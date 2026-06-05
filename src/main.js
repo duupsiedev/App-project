@@ -4,6 +4,7 @@ import {
   approveDraft,
   generateDraftReply,
   getEmailThread,
+  listEmployees,
   listDrafts,
   listEmails,
   listRules,
@@ -18,6 +19,7 @@ const app = document.querySelector("#app");
 const state = {
   tab: "dashboard",
   emails: [],
+  employees: [],
   rules: [],
   drafts: [],
   loading: {
@@ -35,7 +37,7 @@ app.innerHTML = `
   <div class="app">
     <aside>
       <div class="brand">
-        <div class="brand-title">BoîteClaire</div>
+        <div class="brand-title">Courio</div>
         <div class="brand-sub">Assistant Outlook pour PME</div>
       </div>
       <nav class="nav">
@@ -46,7 +48,7 @@ app.innerHTML = `
         <button data-tab="drafts">Drafts <small>Approval</small></button>
         <button data-tab="admin">Admin <small>Security</small></button>
       </nav>
-      <div class="aside-note">BoîteClaire connects to Microsoft 365, reads selected mailbox data, and suggests actions. By default, it does not send email or modify mailboxes without approval.</div>
+      <div class="aside-note">Courio uses fake local mailbox data in this prototype and suggests actions. It never sends email or modifies a real mailbox.</div>
     </aside>
     <main>
       <div class="header">
@@ -104,8 +106,9 @@ function switchTab(tab) {
 
 async function loadInitialData() {
   try {
-    const [emails, rules, drafts] = await Promise.all([listEmails(), listRules(), listDrafts()]);
+    const [emails, employees, rules, drafts] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts()]);
     state.emails = emails;
+    state.employees = employees;
     state.rules = rules;
     state.drafts = drafts;
   } catch (error) {
@@ -180,7 +183,7 @@ function renderDashboard() {
 function renderImport() {
   const steps = [
     ["Connect Microsoft 365", "Admin authorizes access to selected Outlook mailboxes, folders, categories, and contacts.", "Connect"],
-    ["Import mailbox structure", "BoîteClaire detects folders, categories, shared mailboxes, frequent senders, and existing work habits.", "Import"],
+    ["Import mailbox structure", "Courio detects folders, categories, shared mailboxes, frequent senders, and existing work habits.", "Import"],
     ["Generate workflow suggestions", "Suggested triage rules are created but remain inactive until approved.", "View suggestions"],
     ["Run in observation mode", "The system previews actions for one week before any mailbox changes are enabled.", "Enable"]
   ];
@@ -212,8 +215,8 @@ function renderTriage() {
           ${state.emails.map((email) => `
             <tr>
               <td>${email.subject}</td>
-              <td>${email.sender}</td>
-              <td><span class="badge ${badgeClass(email.category)}">${email.category}</span></td>
+              <td>${email.sender}<br><small>${email.senderEmail || ""}</small></td>
+              <td><span class="badge ${badgeClass(email.category)}">${email.category}</span><br><small>${email.urgency || "Medium"} urgency - ${email.confidence || 80}% confidence</small></td>
               <td>${email.suggestedAction}</td>
               <td><span class="badge ${email.status === "Done" ? "done" : ""}">${email.status}</span></td>
               <td class="actions">
@@ -228,6 +231,7 @@ function renderTriage() {
   const thread = state.selectedThread
     ? `<div class="thread-view panel">
         <div class="panel-title"><h2>${state.selectedThread.subject}</h2><span>Mock thread</span></div>
+        <div class="preview">${state.selectedThread.body || ""}</div>
         <ul>${state.selectedThread.messages.map((message) => `<li>${message}</li>`).join("")}</ul>
         ${state.summary ? `<div class="preview"><strong>Summary:</strong> ${state.summary}</div>` : ""}
         ${state.draftPreview ? `<label>Generated draft<textarea data-draft-editor>${state.draftPreview}</textarea></label>` : ""}
@@ -319,13 +323,28 @@ function renderAdmin() {
           <tr><td>Least-privilege access</td><td>Mailbox permissions reviewed during setup</td></tr>
         </table>
       </div>
+      <div class="panel">
+        <div class="panel-title"><h2>Employee directory</h2><span>Mock team</span></div>
+        <table class="table">
+          <thead><tr><th>Name</th><th>Role</th><th>Department</th></tr></thead>
+          <tbody>
+            ${state.employees.map((employee) => `
+              <tr>
+                <td>${employee.name}<br><small>${employee.email}</small></td>
+                <td>${employee.title}</td>
+                <td>${employee.department}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
     </div>
   `;
 }
 
 function badgeClass(label) {
-  if (label === "Urgent") return "urgent";
-  if (label === "Accounting" || label === "Documents") return "invoice";
+  if (label === "Urgent" || label === "Client complaint") return "urgent";
+  if (label === "Accounting" || label === "Documents" || label === "Missing documents") return "invoice";
   if (label === "Sales") return "lead";
   return "";
 }
