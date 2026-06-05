@@ -41,6 +41,10 @@ function loadState() {
     return {
       ...clone(defaultState),
       ...parsed,
+      emails: mergeById(defaultState.emails, parsed.emails),
+      employees: mergeById(defaultState.employees, parsed.employees),
+      rules: mergeById(defaultState.rules, parsed.rules),
+      drafts: mergeById(defaultState.drafts, parsed.drafts),
       settings: {
         ...defaultState.settings,
         ...(parsed.settings || {})
@@ -49,6 +53,13 @@ function loadState() {
   } catch {
     return clone(defaultState);
   }
+}
+
+function mergeById(defaultItems, savedItems = []) {
+  return defaultItems.map((defaultItem) => {
+    const savedItem = savedItems.find((item) => item.id === defaultItem.id);
+    return savedItem ? { ...defaultItem, ...savedItem } : clone(defaultItem);
+  });
 }
 
 function persistState() {
@@ -65,6 +76,12 @@ function findDraft(id) {
   const draft = state.drafts.find((item) => item.id === id);
   if (!draft) throw new Error("Draft not found.");
   return draft;
+}
+
+function findEmployee(id) {
+  const employee = state.employees.find((item) => item.id === id);
+  if (!employee) throw new Error("Employee not found.");
+  return employee;
 }
 
 export async function listEmails() {
@@ -92,18 +109,28 @@ export async function getSettings() {
   return clone(state.settings);
 }
 
+export async function saveSettings(settings) {
+  await delay(450);
+  state.settings = {
+    ...state.settings,
+    ...settings,
+    approvalRequired: true,
+    autoSend: false
+  };
+  persistState();
+  return clone(state.settings);
+}
+
+export async function resetDemoData() {
+  await delay(350);
+  window.localStorage.removeItem(STORAGE_KEY);
+  return clone(defaultState);
+}
+
 export async function getEmailThread(id) {
   await delay();
   const email = findEmail(id);
-  return clone({
-    id: email.id,
-    subject: email.subject,
-    sender: email.sender,
-    senderEmail: email.senderEmail,
-    body: email.body,
-    messages: email.thread,
-    explanation: email.explanation
-  });
+  return clone({ ...email, messages: email.thread });
 }
 
 export async function summarizeThread(id) {
@@ -113,7 +140,12 @@ export async function summarizeThread(id) {
 
 export async function generateDraftReply(id) {
   await delay(750);
-  return findEmail(id).draft;
+  const email = findEmail(id);
+  const draft = findDraft(id);
+  draft.text = email.draft;
+  draft.status = draft.status === "Approved" ? "Approved" : "Generated";
+  persistState();
+  return draft.text;
 }
 
 export async function saveDraft(id, draftText) {
@@ -156,6 +188,24 @@ export async function markEmailDone(id) {
     emailId: id,
     completedAt: new Date().toISOString()
   });
+  persistState();
+  return clone(email);
+}
+
+export async function updateEmailCategory(id, category) {
+  await delay(400);
+  if (!category) throw new Error("Choose a category before saving.");
+  const email = findEmail(id);
+  email.category = category;
+  persistState();
+  return clone(email);
+}
+
+export async function assignEmail(id, employeeId) {
+  await delay(400);
+  findEmployee(employeeId);
+  const email = findEmail(id);
+  email.assignedTo = employeeId;
   persistState();
   return clone(email);
 }

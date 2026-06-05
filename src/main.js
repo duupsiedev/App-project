@@ -2,16 +2,21 @@ import "./styles.css";
 import { copy } from "./data/mockCopy.js";
 import {
   approveDraft,
+  assignEmail,
   generateDraftReply,
+  getSettings,
   getEmailThread,
   listEmployees,
   listDrafts,
   listEmails,
   listRules,
   markEmailDone,
+  resetDemoData,
+  saveSettings,
   saveDraft,
   summarizeThread,
-  toggleRule
+  toggleRule,
+  updateEmailCategory
 } from "./api/mockApi.js";
 
 const app = document.querySelector("#app");
@@ -22,14 +27,22 @@ const state = {
   employees: [],
   rules: [],
   drafts: [],
+  settings: {
+    companyName: "Demo PME Inc.",
+    defaultMode: "Observation only",
+    escalationRecipient: "owner@company.ca",
+    approvalRequired: true,
+    autoSend: false
+  },
   loading: {
     emails: true,
     rules: true,
     drafts: true
   },
   busy: {},
-  selectedThread: null,
+  selectedEmail: null,
   summary: "",
+  showExplanation: false,
   draftPreview: ""
 };
 
@@ -66,6 +79,7 @@ app.innerHTML = `
       <section id="admin" class="section"></section>
     </main>
   </div>
+  <div id="drawerRoot"></div>
   <div class="toast" id="toast"></div>
 `;
 
@@ -104,13 +118,22 @@ function switchTab(tab) {
   render();
 }
 
+async function refreshEmails(keepSelectedId = state.selectedEmail?.id) {
+  state.emails = await listEmails();
+  if (keepSelectedId) {
+    const selected = state.emails.find((email) => email.id === keepSelectedId);
+    state.selectedEmail = selected ? { ...selected, messages: selected.thread } : null;
+  }
+}
+
 async function loadInitialData() {
   try {
-    const [emails, employees, rules, drafts] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts()]);
+    const [emails, employees, rules, drafts, settings] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts(), getSettings()]);
     state.emails = emails;
     state.employees = employees;
     state.rules = rules;
     state.drafts = drafts;
+    state.settings = { ...state.settings, ...settings };
   } catch (error) {
     toast(error.message || "Could not load mock data.", true);
   } finally {
@@ -137,6 +160,7 @@ function render() {
   renderRules();
   renderDrafts();
   renderAdmin();
+  renderDrawer();
 }
 
 function renderDashboard() {
@@ -207,16 +231,18 @@ function renderImport() {
 }
 
 function renderTriage() {
+  const employeeById = Object.fromEntries(state.employees.map((employee) => [employee.id, employee]));
   const table = state.loading.emails
     ? `<div class="loading">Loading mock inbox...</div>`
     : `<table class="table">
-        <thead><tr><th>Subject</th><th>Sender</th><th>Category</th><th>Suggested action</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Subject</th><th>Sender</th><th>Category</th><th>Assigned</th><th>Suggested action</th><th>Status</th><th></th></tr></thead>
         <tbody>
           ${state.emails.map((email) => `
             <tr>
               <td>${email.subject}</td>
               <td>${email.sender}<br><small>${email.senderEmail || ""}</small></td>
               <td><span class="badge ${badgeClass(email.category)}">${email.category}</span><br><small>${email.urgency || "Medium"} urgency - ${email.confidence || 80}% confidence</small></td>
+              <td>${employeeById[email.assignedTo]?.name || "Unassigned"}</td>
               <td>${email.suggestedAction}</td>
               <td><span class="badge ${email.status === "Done" ? "done" : ""}">${email.status}</span></td>
               <td class="actions">
@@ -228,27 +254,91 @@ function renderTriage() {
         </tbody>
       </table>`;
 
-  const thread = state.selectedThread
-    ? `<div class="thread-view panel">
-        <div class="panel-title"><h2>${state.selectedThread.subject}</h2><span>Mock thread</span></div>
-        <div class="preview">${state.selectedThread.body || ""}</div>
-        <ul>${state.selectedThread.messages.map((message) => `<li>${message}</li>`).join("")}</ul>
-        ${state.summary ? `<div class="preview"><strong>Summary:</strong> ${state.summary}</div>` : ""}
-        ${state.draftPreview ? `<label>Generated draft<textarea data-draft-editor>${state.draftPreview}</textarea></label>` : ""}
-        <div class="actions">
-          <button class="btn primary" data-summary-email="${state.selectedThread.id}" ${isBusy(`summary-${state.selectedThread.id}`) ? "disabled" : ""}>${isBusy(`summary-${state.selectedThread.id}`) ? "Summarizing..." : "Summarize thread"}</button>
-          <button class="btn subtle" data-generate-draft="${state.selectedThread.id}" ${isBusy(`draft-${state.selectedThread.id}`) ? "disabled" : ""}>${isBusy(`draft-${state.selectedThread.id}`) ? "Drafting..." : "Generate draft"}</button>
-          <button class="btn success" data-save-draft="${state.selectedThread.id}" ${!state.draftPreview || isBusy(`save-${state.selectedThread.id}`) ? "disabled" : ""}>${isBusy(`save-${state.selectedThread.id}`) ? "Saving..." : "Save draft"}</button>
-        </div>
-      </div>`
-    : "";
-
   document.querySelector("#triage").innerHTML = `
     <div class="panel">
       <div class="panel-title"><h2>Inbox triage</h2><span>Suggested actions only</span></div>
       ${table}
     </div>
-    ${thread}
+  `;
+}
+
+function renderDrawer() {
+  const root = document.querySelector("#drawerRoot");
+  if (!state.selectedEmail) {
+    root.innerHTML = "";
+    return;
+  }
+
+  const email = state.selectedEmail;
+  const assignedEmployee = state.employees.find((employee) => employee.id === email.assignedTo);
+  const categories = ["Client complaint", "Accounting", "Sales", "Documents", "Missing documents", "Scheduling", "General"];
+
+  root.innerHTML = `
+    <div class="drawer-backdrop" data-close-drawer></div>
+    <aside class="review-drawer" aria-label="Email review">
+      <div class="drawer-header">
+        <div>
+          <div class="badge ${badgeClass(email.category)}">${email.category}</div>
+          <h2>${email.subject}</h2>
+          <p>${email.sender} · ${email.senderEmail}</p>
+        </div>
+        <button class="btn subtle" data-close-drawer>Close</button>
+      </div>
+
+      <div class="drawer-section">
+        <h3>Email body</h3>
+        <div class="preview">${email.body}</div>
+      </div>
+
+      <div class="drawer-grid">
+        <label>Category
+          <select data-email-category="${email.id}">
+            ${categories.map((category) => `<option value="${category}" ${category === email.category ? "selected" : ""}>${category}</option>`).join("")}
+          </select>
+        </label>
+        <label>Assigned employee
+          <select data-email-assignee="${email.id}">
+            ${state.employees.map((employee) => `<option value="${employee.id}" ${employee.id === email.assignedTo ? "selected" : ""}>${employee.name} - ${employee.department}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+
+      <div class="drawer-grid">
+        <div class="mini-stat"><span>Urgency</span><strong>${email.urgency}</strong></div>
+        <div class="mini-stat"><span>Confidence</span><strong>${email.confidence}%</strong></div>
+        <div class="mini-stat"><span>Status</span><strong>${email.status}</strong></div>
+        <div class="mini-stat"><span>Owner</span><strong>${assignedEmployee?.name || "Unassigned"}</strong></div>
+      </div>
+
+      <div class="drawer-section">
+        <h3>Suggested action</h3>
+        <div class="preview">${email.suggestedAction}</div>
+      </div>
+
+      <div class="drawer-section">
+        <div class="panel-title compact-title">
+          <h3>Why was this flagged?</h3>
+          <button class="btn subtle" data-toggle-explanation>${state.showExplanation ? "Hide" : "Show"}</button>
+        </div>
+        ${state.showExplanation ? `<div class="preview">${email.explanation}</div>` : ""}
+      </div>
+
+      <div class="drawer-section">
+        <h3>Thread</h3>
+        <ul>${email.messages.map((message) => `<li>${message}</li>`).join("")}</ul>
+      </div>
+
+      ${state.summary ? `<div class="drawer-section"><h3>Summary</h3><div class="preview">${state.summary}</div></div>` : ""}
+      ${state.draftPreview ? `<div class="drawer-section"><label>Generated draft<textarea data-draft-editor>${state.draftPreview}</textarea></label></div>` : ""}
+
+      <div class="drawer-actions">
+        <button class="btn primary" data-summary-email="${email.id}" ${isBusy(`summary-${email.id}`) ? "disabled" : ""}>${isBusy(`summary-${email.id}`) ? "Summarizing..." : "Summarize"}</button>
+        <button class="btn subtle" data-generate-draft="${email.id}" ${isBusy(`draft-${email.id}`) ? "disabled" : ""}>${isBusy(`draft-${email.id}`) ? "Drafting..." : "Generate draft"}</button>
+        <button class="btn success" data-save-draft="${email.id}" ${!state.draftPreview || isBusy(`save-${email.id}`) ? "disabled" : ""}>${isBusy(`save-${email.id}`) ? "Saving..." : "Save draft"}</button>
+        <button class="btn success" data-done-email="${email.id}" ${email.status === "Done" || isBusy(`done-${email.id}`) ? "disabled" : ""}>${isBusy(`done-${email.id}`) ? "Saving..." : "Mark done"}</button>
+      </div>
+      <p class="drawer-note">This is a local prototype. Courio does not send email.</p>
+    </aside>
   `;
 }
 
@@ -308,10 +398,15 @@ function renderAdmin() {
       <div class="panel">
         <div class="panel-title"><h2>Workspace settings</h2><span>Prototype</span></div>
         <div class="form-grid">
-          <label>Company name<input value="Demo PME Inc."></label>
-          <label>Default mode<select><option>Observation only</option><option>Drafts allowed, no auto-send</option><option>Auto-categorize after approval</option></select></label>
-          <label>Escalation recipient<input value="owner@company.ca"></label>
+          <label>Company name<input data-setting="companyName" value="${state.settings.companyName || "Demo PME Inc."}"></label>
+          <label>Default mode
+            <select data-setting="defaultMode">
+              ${["Observation only", "Drafts allowed, no auto-send", "Auto-categorize after approval"].map((mode) => `<option ${mode === state.settings.defaultMode ? "selected" : ""}>${mode}</option>`).join("")}
+            </select>
+          </label>
+          <label>Escalation recipient<input data-setting="escalationRecipient" value="${state.settings.escalationRecipient || "owner@company.ca"}"></label>
           <button class="btn primary" data-save-settings ${isBusy("settings") ? "disabled" : ""}>${isBusy("settings") ? "Saving..." : "Save settings"}</button>
+          <button class="btn danger" data-reset-demo ${isBusy("reset-demo") ? "disabled" : ""}>${isBusy("reset-demo") ? "Resetting..." : "Reset Demo Data"}</button>
         </div>
       </div>
       <div class="panel">
@@ -373,10 +468,24 @@ document.addEventListener("click", async (event) => {
   if (target.dataset.reviewEmail) {
     const id = target.dataset.reviewEmail;
     await runAction(`review-${id}`, async () => {
-      state.selectedThread = await getEmailThread(id);
+      state.selectedEmail = await getEmailThread(id);
       state.summary = "";
+      state.showExplanation = false;
       state.draftPreview = "";
     }, "Message thread opened.");
+  }
+
+  if (target.dataset.closeDrawer !== undefined) {
+    state.selectedEmail = null;
+    state.summary = "";
+    state.draftPreview = "";
+    state.showExplanation = false;
+    render();
+  }
+
+  if (target.dataset.toggleExplanation !== undefined) {
+    state.showExplanation = !state.showExplanation;
+    render();
   }
 
   if (target.dataset.summaryEmail) {
@@ -390,6 +499,7 @@ document.addEventListener("click", async (event) => {
     const id = target.dataset.generateDraft;
     await runAction(`draft-${id}`, async () => {
       state.draftPreview = await generateDraftReply(id);
+      state.drafts = await listDrafts();
     }, "Draft reply generated.");
   }
 
@@ -407,7 +517,7 @@ document.addEventListener("click", async (event) => {
     const id = target.dataset.doneEmail;
     await runAction(`done-${id}`, async () => {
       await markEmailDone(id);
-      state.emails = await listEmails();
+      await refreshEmails(id);
     }, "Email marked done.");
   }
 
@@ -441,7 +551,39 @@ document.addEventListener("click", async (event) => {
   }
 
   if (target.dataset.saveSettings !== undefined) {
-    await runAction("settings", () => new Promise((resolve) => setTimeout(resolve, 550)), "Settings saved locally.");
+    const settings = Object.fromEntries(
+      [...document.querySelectorAll("[data-setting]")].map((input) => [input.dataset.setting, input.value])
+    );
+    await runAction("settings", async () => {
+      state.settings = await saveSettings(settings);
+    }, "Settings saved locally.");
+  }
+
+  if (target.dataset.resetDemo !== undefined) {
+    await runAction("reset-demo", async () => {
+      await resetDemoData();
+      window.location.reload();
+    }, "Demo data reset.");
+  }
+});
+
+document.addEventListener("change", async (event) => {
+  const target = event.target;
+
+  if (target.dataset.emailCategory) {
+    const id = target.dataset.emailCategory;
+    await runAction(`category-${id}`, async () => {
+      await updateEmailCategory(id, target.value);
+      await refreshEmails(id);
+    }, "Category updated locally.");
+  }
+
+  if (target.dataset.emailAssignee) {
+    const id = target.dataset.emailAssignee;
+    await runAction(`assign-${id}`, async () => {
+      await assignEmail(id, target.value);
+      await refreshEmails(id);
+    }, "Email assignment updated locally.");
   }
 });
 
