@@ -13,6 +13,7 @@ import {
   getSettings,
   getEmailThread,
   getWorkflowCompletionCheck,
+  listAssistantMessages,
   listEmployees,
   listDrafts,
   listEmails,
@@ -21,6 +22,7 @@ import {
   resetDemoData,
   saveSettings,
   saveDraft,
+  sendAssistantCommand,
   summarizeThread,
   toggleRule,
   updateRule,
@@ -55,6 +57,10 @@ const state = {
   selectedDraftIds: [],
   confirmDialog: null,
   digest: null,
+  triageFilter: "all",
+  draftFilter: "all",
+  assistantOpen: false,
+  assistantMessages: [],
   summary: "",
   showExplanation: false
 };
@@ -94,6 +100,7 @@ app.innerHTML = `
   </div>
   <div id="drawerRoot"></div>
   <div id="modalRoot"></div>
+  <div id="assistantRoot"></div>
   <div class="toast" id="toast"></div>
 `;
 
@@ -152,15 +159,25 @@ function lowRiskBulkApprovalEnabled() {
   return state.settings.allowLowRiskBulkApproval !== "No";
 }
 
+function escapeHtml(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 async function loadInitialData() {
   try {
-    const [emails, employees, rules, drafts, settings, digest] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts(), getSettings(), generateMorningDigest()]);
+    const [emails, employees, rules, drafts, settings, digest, assistantMessages] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages()]);
     state.emails = emails;
     state.employees = employees;
     state.rules = rules;
     state.drafts = drafts;
     state.settings = { ...state.settings, ...settings };
     state.digest = digest;
+    state.assistantMessages = assistantMessages;
   } catch (error) {
     toast(error.message || "Could not load mock data.", true);
   } finally {
@@ -189,6 +206,7 @@ function render() {
   renderAdmin();
   renderDrawer();
   renderConfirmModal();
+  renderAssistant();
 }
 
 function renderDashboard() {
@@ -269,12 +287,19 @@ function renderImport() {
 
 function renderTriage() {
   const employeeById = Object.fromEntries(state.employees.map((employee) => [employee.id, employee]));
+  const filteredEmails = state.emails.filter((email) => {
+    if (state.triageFilter === "urgent") return email.status !== "Done" && email.urgency === "High";
+    if (state.triageFilter === "invoices") return email.status !== "Done" && email.category === "Accounting";
+    return true;
+  });
   const table = state.loading.emails
     ? `<div class="loading">Loading mock inbox...</div>`
+    : filteredEmails.length === 0
+      ? `<div class="empty-state">No emails match this view. Try All inbox or reset the demo data.</div>`
     : `<table class="table">
         <thead><tr><th>Subject</th><th>Sender</th><th>Category</th><th>Assigned</th><th>Workflow</th><th>Status</th><th></th></tr></thead>
         <tbody>
-          ${state.emails.map((email) => `
+          ${filteredEmails.map((email) => `
             <tr>
               <td>${email.subject}</td>
               <td>${email.sender}<br><small>${email.senderEmail || ""}</small></td>
@@ -294,6 +319,13 @@ function renderTriage() {
   document.querySelector("#triage").innerHTML = `
     <div class="panel">
       <div class="panel-title"><h2>Inbox triage</h2><span>Suggested actions only</span></div>
+      <div class="segmented" style="margin-bottom:14px">
+        ${[
+          ["all", "All inbox"],
+          ["urgent", "Urgent"],
+          ["invoices", "Invoices"]
+        ].map(([value, label]) => `<button class="${state.triageFilter === value ? "active" : ""}" data-triage-filter="${value}">${label}</button>`).join("")}
+      </div>
       ${table}
     </div>
   `;
@@ -585,12 +617,19 @@ function renderDrafts() {
   const selectedCount = state.selectedDraftIds.length;
   const lowRiskPendingCount = state.drafts.filter((draft) => draft.risk !== "High" && draft.canSelectForBulkApproval).length;
   const lowRiskDisabled = !lowRiskBulkApprovalEnabled();
+  const filteredDrafts = state.drafts.filter((draft) => {
+    if (state.draftFilter === "needs_approval") return draft.canSelectForBulkApproval;
+    if (state.draftFilter === "ready") return draft.isReadyForHumanSend;
+    return true;
+  });
   const content = state.loading.drafts
     ? `<div class="loading">Loading draft queue...</div>`
+    : filteredDrafts.length === 0
+      ? `<div class="empty-state">No drafts match this view. Drafts appear here after Courio prepares local suggested replies.</div>`
     : `<table class="table">
         <thead><tr><th>Select</th><th>Draft</th><th>Source</th><th>Risk</th><th>Status</th><th></th></tr></thead>
         <tbody>
-          ${state.drafts.map((draft) => `
+          ${filteredDrafts.map((draft) => `
             <tr>
               <td><input type="checkbox" data-select-draft="${draft.id}" ${state.selectedDraftIds.includes(draft.id) ? "checked" : ""} ${!draft.canSelectForBulkApproval ? "disabled" : ""}></td>
               <td>${draft.title}</td>
@@ -609,6 +648,13 @@ function renderDrafts() {
   document.querySelector("#drafts").innerHTML = `
     <div class="panel">
       <div class="panel-title"><h2>Draft approval queue</h2><span>Human approval required</span></div>
+      <div class="segmented" style="margin-bottom:14px">
+        ${[
+          ["all", "All drafts"],
+          ["needs_approval", "Needs approval"],
+          ["ready", "Ready"]
+        ].map(([value, label]) => `<button class="${state.draftFilter === value ? "active" : ""}" data-draft-filter="${value}">${label}</button>`).join("")}
+      </div>
       <div class="actions" style="margin-bottom:14px">
         <button class="btn success" data-approve-selected ${selectedCount === 0 || isBusy("approve-selected") ? "disabled" : ""}>${isBusy("approve-selected") ? "Approving..." : `Approve selected (${selectedCount})`}</button>
         <button class="btn subtle" data-approve-low-risk ${lowRiskDisabled || lowRiskPendingCount === 0 || isBusy("approve-low-risk") ? "disabled" : ""}>${lowRiskDisabled ? "Low-risk bulk approval disabled" : isBusy("approve-low-risk") ? "Approving..." : `Approve all low-risk (${lowRiskPendingCount})`}</button>
@@ -618,6 +664,99 @@ function renderDrafts() {
       ${content}
     </div>
   `;
+}
+
+function renderAssistant() {
+  const root = document.querySelector("#assistantRoot");
+  const messages = state.assistantMessages.length
+    ? state.assistantMessages
+    : [{ id: "assistant-loading", role: "assistant", text: "Loading assistant history..." }];
+
+  root.innerHTML = `
+    <div class="assistant ${state.assistantOpen ? "open" : ""}">
+      ${state.assistantOpen ? `
+        <div class="assistant-panel" aria-label="Courio assistant">
+          <div class="assistant-header">
+            <div>
+              <strong>Courio assistant</strong>
+              <span>Fake/local commands</span>
+            </div>
+            <button class="btn subtle" data-assistant-toggle>Close</button>
+          </div>
+          <div class="assistant-messages">
+            ${messages.map((message) => `
+              <div class="assistant-message ${message.role}">
+                ${escapeHtml(message.text)}
+              </div>
+            `).join("")}
+          </div>
+          <form class="assistant-form">
+            <input data-assistant-input placeholder="Show urgent emails" autocomplete="off" ${isBusy("assistant") ? "disabled" : ""}>
+            <button class="btn primary" type="submit" ${isBusy("assistant") ? "disabled" : ""}>${isBusy("assistant") ? "Working..." : "Send"}</button>
+          </form>
+        </div>
+      ` : ""}
+      <button class="assistant-fab" data-assistant-toggle aria-label="Open Courio assistant">
+        AI
+      </button>
+    </div>
+  `;
+}
+
+async function applyAssistantAction(action) {
+  if (!action) return;
+
+  if (action.type === "show_triage") {
+    state.tab = "triage";
+    state.triageFilter = action.filter || "all";
+    state.selectedDraft = null;
+    state.selectedRule = null;
+    render();
+    return;
+  }
+
+  if (action.type === "show_drafts") {
+    state.tab = "drafts";
+    state.draftFilter = action.filter || "all";
+    state.selectedEmail = null;
+    state.selectedRule = null;
+    render();
+    return;
+  }
+
+  if (action.type === "generate_digest") {
+    state.digest = action.digest || await generateMorningDigest();
+    state.tab = "dashboard";
+    render();
+    return;
+  }
+
+  if (action.type === "explain_email") {
+    state.selectedEmail = await getEmailThread(action.emailId);
+    state.selectedDraft = null;
+    state.selectedRule = null;
+    state.summary = "";
+    state.showExplanation = true;
+    state.tab = "triage";
+    state.triageFilter = "all";
+    render();
+    return;
+  }
+
+  if (action.type === "show_rule") {
+    state.rules = await listRules();
+    state.selectedRule = state.rules.find((rule) => rule.id === action.ruleId) || null;
+    state.selectedEmail = null;
+    state.selectedDraft = null;
+    state.tab = "rules";
+    render();
+    return;
+  }
+
+  if (action.type === "reset_demo_data") {
+    await resetDemoData();
+    window.location.reload();
+  }
 }
 
 function renderAdmin() {
@@ -691,6 +830,12 @@ document.addEventListener("click", async (event) => {
   const target = event.target.closest("button");
   if (!target) return;
 
+  if (target.dataset.assistantToggle !== undefined) {
+    state.assistantOpen = !state.assistantOpen;
+    render();
+    return;
+  }
+
   if (target.dataset.confirmCancel !== undefined) {
     state.confirmDialog = null;
     render();
@@ -739,6 +884,16 @@ document.addEventListener("click", async (event) => {
 
   if (target.dataset.tabTarget) {
     switchTab(target.dataset.tabTarget);
+  }
+
+  if (target.dataset.triageFilter) {
+    state.triageFilter = target.dataset.triageFilter;
+    render();
+  }
+
+  if (target.dataset.draftFilter) {
+    state.draftFilter = target.dataset.draftFilter;
+    render();
   }
 
   if (target.dataset.action === "digest") {
@@ -953,6 +1108,25 @@ document.addEventListener("change", async (event) => {
       : state.selectedDraftIds.filter((draftId) => draftId !== id);
     render();
   }
+});
+
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest(".assistant-form");
+  if (!form) return;
+  event.preventDefault();
+
+  const input = form.querySelector("[data-assistant-input]");
+  const message = input.value.trim();
+  if (!message) return;
+
+  await runAction("assistant", async () => {
+    const result = await sendAssistantCommand(message, {
+      selectedEmailId: state.selectedEmail?.id || null
+    });
+    state.assistantMessages = result.messages;
+    input.value = "";
+    await applyAssistantAction(result.action);
+  });
 });
 
 render();

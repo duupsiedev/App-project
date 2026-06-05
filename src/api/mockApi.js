@@ -3,6 +3,7 @@ import { mockEmployees } from "../data/mockEmployees.js";
 import { mockRules } from "../data/mockRules.js";
 
 const STORAGE_KEY = "courio.mockState.v1";
+const CHAT_STORAGE_KEY = "courio.assistantHistory.v1";
 
 const defaultState = {
   emails: structuredClone(mockEmails),
@@ -36,6 +37,7 @@ const defaultState = {
 };
 
 const state = loadState();
+let assistantHistory = loadAssistantHistory();
 const delay = (ms = 550) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function clone(value) {
@@ -66,14 +68,44 @@ function loadState() {
 }
 
 function mergeById(defaultItems, savedItems = []) {
-  return defaultItems.map((defaultItem) => {
+  const mergedDefaults = defaultItems.map((defaultItem) => {
     const savedItem = savedItems.find((item) => item.id === defaultItem.id);
     return savedItem ? { ...defaultItem, ...savedItem } : clone(defaultItem);
   });
+  const savedOnlyItems = savedItems.filter((savedItem) => !defaultItems.some((defaultItem) => defaultItem.id === savedItem.id));
+  return [...mergedDefaults, ...savedOnlyItems.map(clone)];
 }
 
 function persistState() {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function loadAssistantHistory() {
+  try {
+    const saved = window.localStorage.getItem(CHAT_STORAGE_KEY);
+    if (!saved) {
+      return [
+        {
+          id: "assistant-welcome",
+          role: "assistant",
+          text: "Hi, I can help with urgent emails, invoices, drafts, digest updates, rules, and explanations."
+        }
+      ];
+    }
+    return JSON.parse(saved);
+  } catch {
+    return [
+      {
+        id: "assistant-welcome",
+        role: "assistant",
+        text: "Hi, I can help with urgent emails, invoices, drafts, digest updates, rules, and explanations."
+      }
+    ];
+  }
+}
+
+function persistAssistantHistory() {
+  window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(assistantHistory));
 }
 
 function lowRiskBulkApprovalEnabled() {
@@ -214,6 +246,122 @@ function findEmployee(id) {
   return employee;
 }
 
+function buildDigest() {
+  const openEmails = state.emails.filter((email) => email.status !== "Done");
+  const readyDrafts = state.drafts.filter((draft) => draft.status === "Ready for human send").length;
+  const waitingDrafts = state.drafts.filter((draft) => draft.status !== "Ready for human send" && draft.status !== "Approved").length;
+  const byCategory = (category) => openEmails.filter((email) => email.category === category);
+  const urgent = openEmails.filter((email) => email.urgency === "High");
+
+  return {
+    generatedAt: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+    headline: `${openEmails.length} open emails need review. ${urgent.length} are urgent and ${waitingDrafts} drafts need approval.`,
+    urgentItems: urgent.map((email) => email.subject),
+    draftsAwaitingApproval: waitingDrafts,
+    readyForHumanSend: readyDrafts,
+    invoices: byCategory("Accounting").map((email) => email.subject),
+    missingDocuments: byCategory("Missing documents").map((email) => email.subject),
+    quoteRequests: byCategory("Sales").map((email) => email.subject),
+    clientComplaints: byCategory("Client complaint").map((email) => email.subject),
+    recommendedActions: [
+      urgent.length ? "Review urgent client items first." : "No urgent client escalations are open.",
+      waitingDrafts ? "Review drafts before marking them ready for human send." : "No drafts are waiting for approval.",
+      "Keep observation mode on while this remains a demo."
+    ]
+  };
+}
+
+function getOrCreateInvoiceRule() {
+  const existing = state.rules.find((rule) => /invoice/i.test(`${rule.title} ${rule.desc}`));
+  if (existing) {
+    existing.on = true;
+    persistState();
+    return existing;
+  }
+
+  const rule = {
+    id: `rule-${Date.now()}`,
+    title: "Invoice intake assistant",
+    desc: "Flag invoice messages, payment questions, due dates, and supplier follow-ups for accounting review.",
+    category: "Accounting",
+    confidence: 84,
+    explanation: "Courio would look for invoice numbers, balance-due wording, supplier names, and payment timing.",
+    impact: "Created locally from the assistant chat. It only previews matches in this prototype.",
+    matches: state.emails.filter((email) => email.category === "Accounting").map((email) => email.subject),
+    on: true
+  };
+  state.rules.push(rule);
+  persistState();
+  return rule;
+}
+
+function answerAssistantCommand(rawMessage, context = {}) {
+  const message = rawMessage.trim().toLowerCase();
+  const urgentCount = state.emails.filter((email) => email.status !== "Done" && email.urgency === "High").length;
+  const invoiceCount = state.emails.filter((email) => email.status !== "Done" && email.category === "Accounting").length;
+  const waitingDrafts = state.drafts.filter((draft) => !draftReadyForCompletion(draft) && findEmail(draft.emailId || draft.id).status !== "Done").length;
+
+  if (/urgent/.test(message)) {
+    return {
+      text: `${urgentCount} urgent emails are open. I switched Triage to urgent items.`,
+      action: { type: "show_triage", filter: "urgent" }
+    };
+  }
+
+  if (/invoice|invoices|accounting/.test(message) && /create|rule/.test(message)) {
+    const rule = getOrCreateInvoiceRule();
+    return {
+      text: `Invoice rule is ready in observation mode. It is still fake/local and will not touch a mailbox.`,
+      action: { type: "show_rule", ruleId: rule.id }
+    };
+  }
+
+  if (/invoice|invoices|accounting/.test(message)) {
+    return {
+      text: `${invoiceCount} invoice-related emails are open. I switched Triage to Accounting.`,
+      action: { type: "show_triage", filter: "invoices" }
+    };
+  }
+
+  if (/draft/.test(message) && /approval|approve|need|waiting/.test(message)) {
+    return {
+      text: `${waitingDrafts} drafts need human review or approval. I opened the Drafts queue.`,
+      action: { type: "show_drafts", filter: "needs_approval" }
+    };
+  }
+
+  if (/digest|morning/.test(message)) {
+    return {
+      text: "I regenerated the morning digest from local demo data.",
+      action: { type: "generate_digest", digest: buildDigest() }
+    };
+  }
+
+  if (/explain|why/.test(message)) {
+    if (!context.selectedEmailId) {
+      return {
+        text: "Open an email in Triage first, then ask me to explain it. I will show the flagged reason."
+      };
+    }
+    const email = buildEmailView(findEmail(context.selectedEmailId));
+    return {
+      text: `Courio flagged "${email.subject}" because: ${email.explanation}`,
+      action: { type: "explain_email", emailId: email.id }
+    };
+  }
+
+  if (/reset/.test(message) && /demo|data/.test(message)) {
+    return {
+      text: "I can reset the fake demo data now. The page will reload so defaults come back clean.",
+      action: { type: "reset_demo_data" }
+    };
+  }
+
+  return {
+    text: "Try: Show urgent emails, Show invoices, Show drafts needing approval, Generate digest, Explain selected email, Create invoice rule, or Reset demo data."
+  };
+}
+
 export async function listEmails() {
   await delay();
   return clone(state.emails.map(buildEmailView));
@@ -231,28 +379,7 @@ export async function listRules() {
 
 export async function generateMorningDigest() {
   await delay(700);
-  const openEmails = state.emails.filter((email) => email.status !== "Done");
-  const readyDrafts = state.drafts.filter((draft) => draft.status === "Ready for human send").length;
-  const waitingDrafts = state.drafts.filter((draft) => draft.status !== "Ready for human send" && draft.status !== "Approved").length;
-  const byCategory = (category) => openEmails.filter((email) => email.category === category);
-  const urgent = openEmails.filter((email) => email.urgency === "High");
-
-  return clone({
-    generatedAt: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
-    headline: `${openEmails.length} open emails need review. ${urgent.length} are urgent and ${waitingDrafts} drafts need approval.`,
-    urgentItems: urgent.map((email) => email.subject),
-    draftsAwaitingApproval: waitingDrafts,
-    readyForHumanSend: readyDrafts,
-    invoices: byCategory("Accounting").map((email) => email.subject),
-    missingDocuments: byCategory("Missing documents").map((email) => email.subject),
-    quoteRequests: byCategory("Sales").map((email) => email.subject),
-    clientComplaints: byCategory("Client complaint").map((email) => email.subject),
-    recommendedActions: [
-      urgent.length ? "Review urgent client items first." : "No urgent client escalations are open.",
-      waitingDrafts ? "Review drafts before marking them ready for human send." : "No drafts are waiting for approval.",
-      "Keep observation mode on while this remains a demo."
-    ]
-  });
+  return clone(buildDigest());
 }
 
 export async function listDrafts() {
@@ -514,4 +641,34 @@ export async function assignEmail(id, employeeId) {
   email.assignedTo = employeeId;
   persistState();
   return clone(email);
+}
+
+export async function listAssistantMessages() {
+  await delay(150);
+  return clone(assistantHistory);
+}
+
+export async function sendAssistantCommand(message, context = {}) {
+  await delay(500);
+  if (!message?.trim()) throw new Error("Type a command first.");
+
+  const userMessage = {
+    id: `user-${Date.now()}`,
+    role: "user",
+    text: message.trim()
+  };
+  const answer = answerAssistantCommand(message, context);
+  const assistantMessage = {
+    id: `assistant-${Date.now()}`,
+    role: "assistant",
+    text: answer.text
+  };
+
+  assistantHistory = [...assistantHistory, userMessage, assistantMessage].slice(-24);
+  persistAssistantHistory();
+
+  return clone({
+    messages: assistantHistory,
+    action: answer.action || null
+  });
 }
