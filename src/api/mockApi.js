@@ -80,6 +80,10 @@ function findDraft(id) {
   return draft;
 }
 
+function findDraftByEmailId(emailId) {
+  return state.drafts.find((item) => (item.emailId || item.id) === emailId);
+}
+
 function findEmployee(id) {
   const employee = state.employees.find((item) => item.id === id);
   if (!employee) throw new Error("Employee not found.");
@@ -103,7 +107,14 @@ export async function listRules() {
 
 export async function listDrafts() {
   await delay(400);
-  return clone(state.drafts);
+  return clone(state.drafts.map((draft) => {
+    const email = state.emails.find((item) => item.id === (draft.emailId || draft.id));
+    return {
+      ...draft,
+      sourceEmailStatus: email?.status || "Open",
+      sourceWorkflowStatus: email?.workflowStatus || ""
+    };
+  }));
 }
 
 export async function getDraftDetail(id) {
@@ -120,9 +131,19 @@ export async function getDraftDetail(id) {
       body: email.body,
       suggestedAction: email.suggestedAction,
       confidence: email.confidence,
-      urgency: email.urgency
+      urgency: email.urgency,
+      status: email.status,
+      workflowStatus: email.workflowStatus
     }
   });
+}
+
+export async function getDraftForEmail(emailId) {
+  await delay(350);
+  findEmail(emailId);
+  const draft = findDraftByEmailId(emailId);
+  if (!draft) return null;
+  return getDraftDetail(draft.id);
 }
 
 export async function getSettings() {
@@ -162,11 +183,30 @@ export async function summarizeThread(id) {
 export async function generateDraftReply(id) {
   await delay(750);
   const email = findEmail(id);
-  const draft = findDraft(id);
-  draft.text = email.draft;
-  draft.status = draft.status === "Approved" || draft.status === "Ready for human send" ? "Ready for human send" : "Generated";
+  if (email.status === "Done") {
+    throw new Error("This email is done. Reopen it before creating or changing a draft.");
+  }
+
+  let draft = findDraftByEmailId(id);
+  if (!draft) {
+    draft = {
+      id,
+      emailId: id,
+      title: email.suggestedAction,
+      source: email.subject,
+      text: email.draft,
+      confidence: email.confidence,
+      risk: email.urgency === "High" ? "High" : "Low",
+      status: "Generated"
+    };
+    state.drafts.push(draft);
+  } else if (draft.status === "Needs approval" && draft.text === email.draft) {
+    draft.status = "Generated";
+  }
+
+  email.workflowStatus = draft.status === "Ready for human send" ? "Draft approved" : "Draft in review";
   persistState();
-  return draft.text;
+  return clone(draft);
 }
 
 export async function saveDraft(id, draftText) {
@@ -176,8 +216,14 @@ export async function saveDraft(id, draftText) {
   }
 
   const draft = findDraft(id);
+  const email = findEmail(draft.emailId || draft.id);
+  if (email.status === "Done") {
+    throw new Error("This email is done. Reopen it before editing the draft.");
+  }
+
   draft.text = draftText;
   draft.status = "Saved";
+  email.workflowStatus = "Draft saved";
   persistState();
   return clone(draft);
 }
@@ -185,7 +231,12 @@ export async function saveDraft(id, draftText) {
 export async function approveDraft(id) {
   await delay();
   const draft = findDraft(id);
+  const email = findEmail(draft.emailId || draft.id);
+  if (email.status === "Done") {
+    throw new Error("This email is done. Reopen it before changing draft approval.");
+  }
   draft.status = "Ready for human send";
+  email.workflowStatus = "Draft approved";
   persistState();
   return clone(draft);
 }
@@ -203,6 +254,7 @@ export async function markEmailDone(id) {
   await delay();
   const email = findEmail(id);
   email.status = "Done";
+  email.workflowStatus = "Completed";
   state.completedActions.push({
     id: `action-${Date.now()}`,
     type: "email-done",
