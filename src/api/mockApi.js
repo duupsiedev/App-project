@@ -10,9 +10,11 @@ const defaultState = {
   rules: structuredClone(mockRules),
   drafts: mockEmails.map((email) => ({
     id: email.id,
+    emailId: email.id,
     title: email.suggestedAction,
     source: email.subject,
     text: email.draft,
+    confidence: email.confidence,
     risk: email.urgency === "High" ? "High" : "Low",
     status: "Needs approval"
   })),
@@ -104,6 +106,25 @@ export async function listDrafts() {
   return clone(state.drafts);
 }
 
+export async function getDraftDetail(id) {
+  await delay(450);
+  const draft = findDraft(id);
+  const email = findEmail(draft.emailId || draft.id);
+  return clone({
+    ...draft,
+    sourceEmail: {
+      id: email.id,
+      subject: email.subject,
+      sender: email.sender,
+      senderEmail: email.senderEmail,
+      body: email.body,
+      suggestedAction: email.suggestedAction,
+      confidence: email.confidence,
+      urgency: email.urgency
+    }
+  });
+}
+
 export async function getSettings() {
   await delay(250);
   return clone(state.settings);
@@ -143,7 +164,7 @@ export async function generateDraftReply(id) {
   const email = findEmail(id);
   const draft = findDraft(id);
   draft.text = email.draft;
-  draft.status = draft.status === "Approved" ? "Approved" : "Generated";
+  draft.status = draft.status === "Approved" || draft.status === "Ready for human send" ? "Ready for human send" : "Generated";
   persistState();
   return draft.text;
 }
@@ -164,7 +185,7 @@ export async function saveDraft(id, draftText) {
 export async function approveDraft(id) {
   await delay();
   const draft = findDraft(id);
-  draft.status = "Approved";
+  draft.status = "Ready for human send";
   persistState();
   return clone(draft);
 }

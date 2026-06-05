@@ -4,6 +4,7 @@ import {
   approveDraft,
   assignEmail,
   generateDraftReply,
+  getDraftDetail,
   getSettings,
   getEmailThread,
   listEmployees,
@@ -41,6 +42,7 @@ const state = {
   },
   busy: {},
   selectedEmail: null,
+  selectedDraft: null,
   summary: "",
   showExplanation: false,
   draftPreview: ""
@@ -126,6 +128,10 @@ async function refreshEmails(keepSelectedId = state.selectedEmail?.id) {
   }
 }
 
+function isDraftReady(draft) {
+  return draft.status === "Ready for human send" || draft.status === "Approved";
+}
+
 async function loadInitialData() {
   try {
     const [emails, employees, rules, drafts, settings] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts(), getSettings()]);
@@ -174,7 +180,7 @@ function renderDashboard() {
       </div>
       <div class="panel metric">
         <div class="label">Drafts awaiting approval</div>
-        <div class="value">${state.drafts.filter((draft) => draft.status !== "Approved").length || 0}</div>
+        <div class="value">${state.drafts.filter((draft) => !isDraftReady(draft)).length || 0}</div>
         <div class="caption">No messages are sent automatically</div>
       </div>
       <div class="panel metric">
@@ -264,6 +270,11 @@ function renderTriage() {
 
 function renderDrawer() {
   const root = document.querySelector("#drawerRoot");
+  if (state.selectedDraft) {
+    renderDraftDrawer(root);
+    return;
+  }
+
   if (!state.selectedEmail) {
     root.innerHTML = "";
     return;
@@ -280,7 +291,7 @@ function renderDrawer() {
         <div>
           <div class="badge ${badgeClass(email.category)}">${email.category}</div>
           <h2>${email.subject}</h2>
-          <p>${email.sender} · ${email.senderEmail}</p>
+          <p>${email.sender} - ${email.senderEmail}</p>
         </div>
         <button class="btn subtle" data-close-drawer>Close</button>
       </div>
@@ -342,6 +353,59 @@ function renderDrawer() {
   `;
 }
 
+function renderDraftDrawer(root) {
+  const draft = state.selectedDraft;
+  const sourceEmail = draft.sourceEmail || {};
+
+  root.innerHTML = `
+    <div class="drawer-backdrop" data-close-drawer></div>
+    <aside class="review-drawer" aria-label="Draft review">
+      <div class="drawer-header">
+        <div>
+          <div class="badge ${isDraftReady(draft) ? "done" : "pending"}">${isDraftReady(draft) ? "Ready for human send" : draft.status}</div>
+          <h2>${draft.title}</h2>
+          <p>Source: ${sourceEmail.subject || draft.source}</p>
+        </div>
+        <button class="btn subtle" data-close-drawer>Close</button>
+      </div>
+
+      <div class="drawer-section">
+        <h3>Source email</h3>
+        <div class="preview">
+          <strong>${sourceEmail.sender || "Mock sender"}</strong><br>
+          ${sourceEmail.senderEmail || ""}<br><br>
+          ${sourceEmail.body || "This draft is based on a local mock email."}
+        </div>
+      </div>
+
+      <div class="drawer-grid">
+        <div class="mini-stat"><span>Status</span><strong>${isDraftReady(draft) ? "Ready for human send" : draft.status}</strong></div>
+        <div class="mini-stat"><span>Risk level</span><strong>${draft.risk || "Low"}</strong></div>
+        <div class="mini-stat"><span>Confidence</span><strong>${draft.confidence || sourceEmail.confidence || 80}%</strong></div>
+        <div class="mini-stat"><span>Sending</span><strong>Never automatic</strong></div>
+      </div>
+
+      <div class="drawer-section">
+        <h3>Suggested reply</h3>
+        <div class="preview">${sourceEmail.suggestedAction || draft.title}</div>
+      </div>
+
+      <div class="drawer-section">
+        <label>Editable draft body
+          <textarea data-draft-editor>${draft.text}</textarea>
+        </label>
+      </div>
+
+      <div class="drawer-actions">
+        <button class="btn primary" data-save-draft="${draft.id}" ${isBusy(`save-${draft.id}`) ? "disabled" : ""}>${isBusy(`save-${draft.id}`) ? "Saving..." : "Save changes"}</button>
+        <button class="btn success" data-approve-draft="${draft.id}" ${isDraftReady(draft) || isBusy(`approve-${draft.id}`) ? "disabled" : ""}>${isBusy(`approve-${draft.id}`) ? "Approving..." : "Approve"}</button>
+        <button class="btn subtle" data-close-drawer>Close</button>
+      </div>
+      <p class="drawer-note">Approval only marks this draft as ready for a person to send. Courio never sends email.</p>
+    </aside>
+  `;
+}
+
 function renderRules() {
   const content = state.loading.rules
     ? `<div class="loading">Loading suggested rules...</div>`
@@ -371,14 +435,18 @@ function renderDrafts() {
   const content = state.loading.drafts
     ? `<div class="loading">Loading draft queue...</div>`
     : `<table class="table">
-        <thead><tr><th>Draft</th><th>Source</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Draft</th><th>Source</th><th>Risk</th><th>Status</th><th></th></tr></thead>
         <tbody>
           ${state.drafts.map((draft) => `
             <tr>
               <td>${draft.title}</td>
               <td>${draft.source}</td>
-              <td><span class="badge ${draft.status === "Approved" ? "done" : "pending"}">${draft.status}</span></td>
-              <td><button class="btn success" data-approve-draft="${draft.id}" ${draft.status === "Approved" || isBusy(`approve-${draft.id}`) ? "disabled" : ""}>${isBusy(`approve-${draft.id}`) ? "Approving..." : "Approve"}</button></td>
+              <td><span class="badge ${draft.risk === "High" ? "urgent" : "done"}">${draft.risk || "Low"}</span></td>
+              <td><span class="badge ${isDraftReady(draft) ? "done" : "pending"}">${isDraftReady(draft) ? "Ready for human send" : draft.status}</span></td>
+              <td class="actions">
+                <button class="btn subtle" data-review-draft="${draft.id}" ${isBusy(`review-draft-${draft.id}`) ? "disabled" : ""}>${isBusy(`review-draft-${draft.id}`) ? "Opening..." : "Review"}</button>
+                <button class="btn success" data-approve-draft="${draft.id}" ${isDraftReady(draft) || isBusy(`approve-${draft.id}`) ? "disabled" : ""}>${isBusy(`approve-${draft.id}`) ? "Approving..." : "Approve"}</button>
+              </td>
             </tr>
           `).join("")}
         </tbody>
@@ -469,14 +537,27 @@ document.addEventListener("click", async (event) => {
     const id = target.dataset.reviewEmail;
     await runAction(`review-${id}`, async () => {
       state.selectedEmail = await getEmailThread(id);
+      state.selectedDraft = null;
       state.summary = "";
       state.showExplanation = false;
       state.draftPreview = "";
     }, "Message thread opened.");
   }
 
+  if (target.dataset.reviewDraft) {
+    const id = target.dataset.reviewDraft;
+    await runAction(`review-draft-${id}`, async () => {
+      state.selectedDraft = await getDraftDetail(id);
+      state.selectedEmail = null;
+      state.summary = "";
+      state.draftPreview = "";
+      state.showExplanation = false;
+    }, "Draft opened for review.");
+  }
+
   if (target.dataset.closeDrawer !== undefined) {
     state.selectedEmail = null;
+    state.selectedDraft = null;
     state.summary = "";
     state.draftPreview = "";
     state.showExplanation = false;
@@ -510,6 +591,9 @@ document.addEventListener("click", async (event) => {
       await saveDraft(id, editor.value);
       state.drafts = await listDrafts();
       state.draftPreview = editor.value;
+      if (state.selectedDraft?.id === id) {
+        state.selectedDraft = await getDraftDetail(id);
+      }
     }, "Draft saved locally.");
   }
 
@@ -547,7 +631,10 @@ document.addEventListener("click", async (event) => {
     await runAction(`approve-${id}`, async () => {
       await approveDraft(id);
       state.drafts = await listDrafts();
-    }, "Draft approved locally. Nothing was sent.");
+      if (state.selectedDraft?.id === id) {
+        state.selectedDraft = await getDraftDetail(id);
+      }
+    }, "Draft marked ready for human send. Nothing was sent.");
   }
 
   if (target.dataset.saveSettings !== undefined) {
