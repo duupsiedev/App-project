@@ -241,6 +241,43 @@ export async function approveDraft(id) {
   return clone(draft);
 }
 
+export async function approveDrafts(ids) {
+  await delay(650);
+  if (!ids.length) throw new Error("Select at least one draft first.");
+
+  const approved = [];
+  for (const id of ids) {
+    const draft = findDraft(id);
+    const email = findEmail(draft.emailId || draft.id);
+    if (email.status === "Done") continue;
+    draft.status = "Ready for human send";
+    email.workflowStatus = "Draft approved";
+    approved.push(draft.id);
+  }
+
+  if (!approved.length) {
+    throw new Error("No selected drafts could be approved.");
+  }
+
+  persistState();
+  return clone({ approved });
+}
+
+export async function approveLowRiskDrafts() {
+  await delay(700);
+  const lowRiskIds = state.drafts
+    .filter((draft) => draft.risk !== "High")
+    .filter((draft) => draft.status !== "Ready for human send" && draft.status !== "Approved")
+    .filter((draft) => findEmail(draft.emailId || draft.id).status !== "Done")
+    .map((draft) => draft.id);
+
+  if (!lowRiskIds.length) {
+    throw new Error("No low-risk drafts are awaiting approval.");
+  }
+
+  return approveDrafts(lowRiskIds);
+}
+
 export async function toggleRule(id) {
   await delay(450);
   const rule = state.rules.find((item) => item.id === id);

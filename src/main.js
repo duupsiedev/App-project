@@ -2,6 +2,8 @@ import "./styles.css";
 import { copy } from "./data/mockCopy.js";
 import {
   approveDraft,
+  approveDrafts,
+  approveLowRiskDrafts,
   assignEmail,
   generateDraftReply,
   getDraftDetail,
@@ -44,6 +46,7 @@ const state = {
   busy: {},
   selectedEmail: null,
   selectedDraft: null,
+  selectedDraftIds: [],
   summary: "",
   showExplanation: false
 };
@@ -452,13 +455,16 @@ function renderRules() {
 }
 
 function renderDrafts() {
+  const selectedCount = state.selectedDraftIds.length;
+  const lowRiskPendingCount = state.drafts.filter((draft) => draft.risk !== "High" && draft.sourceEmailStatus !== "Done" && !isDraftReady(draft)).length;
   const content = state.loading.drafts
     ? `<div class="loading">Loading draft queue...</div>`
     : `<table class="table">
-        <thead><tr><th>Draft</th><th>Source</th><th>Risk</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Select</th><th>Draft</th><th>Source</th><th>Risk</th><th>Status</th><th></th></tr></thead>
         <tbody>
           ${state.drafts.map((draft) => `
             <tr>
+              <td><input type="checkbox" data-select-draft="${draft.id}" ${state.selectedDraftIds.includes(draft.id) ? "checked" : ""} ${draft.sourceEmailStatus === "Done" || isDraftReady(draft) ? "disabled" : ""}></td>
               <td>${draft.title}</td>
               <td>${draft.source}</td>
               <td><span class="badge ${draft.risk === "High" ? "urgent" : "done"}">${draft.risk || "Low"}</span></td>
@@ -475,6 +481,11 @@ function renderDrafts() {
   document.querySelector("#drafts").innerHTML = `
     <div class="panel">
       <div class="panel-title"><h2>Draft approval queue</h2><span>Human approval required</span></div>
+      <div class="actions" style="margin-bottom:14px">
+        <button class="btn success" data-approve-selected ${selectedCount === 0 || isBusy("approve-selected") ? "disabled" : ""}>${isBusy("approve-selected") ? "Approving..." : `Approve selected (${selectedCount})`}</button>
+        <button class="btn subtle" data-approve-low-risk ${lowRiskPendingCount === 0 || isBusy("approve-low-risk") ? "disabled" : ""}>${isBusy("approve-low-risk") ? "Approving..." : `Approve all low-risk (${lowRiskPendingCount})`}</button>
+        <span class="mode">Approval only marks drafts ready for human send</span>
+      </div>
       ${content}
     </div>
   `;
@@ -662,10 +673,29 @@ document.addEventListener("click", async (event) => {
       await approveDraft(id);
       state.drafts = await listDrafts();
       state.emails = await listEmails();
+      state.selectedDraftIds = state.selectedDraftIds.filter((draftId) => draftId !== id);
       if (state.selectedDraft?.id === id) {
         state.selectedDraft = await getDraftDetail(id);
       }
     }, "Draft marked ready for human send. Nothing was sent.");
+  }
+
+  if (target.dataset.approveSelected !== undefined) {
+    await runAction("approve-selected", async () => {
+      await approveDrafts(state.selectedDraftIds);
+      state.drafts = await listDrafts();
+      state.emails = await listEmails();
+      state.selectedDraftIds = [];
+    }, "Selected drafts marked ready for human send. Nothing was sent.");
+  }
+
+  if (target.dataset.approveLowRisk !== undefined) {
+    await runAction("approve-low-risk", async () => {
+      await approveLowRiskDrafts();
+      state.drafts = await listDrafts();
+      state.emails = await listEmails();
+      state.selectedDraftIds = [];
+    }, "Low-risk drafts marked ready for human send. Nothing was sent.");
   }
 
   if (target.dataset.saveSettings !== undefined) {
@@ -702,6 +732,14 @@ document.addEventListener("change", async (event) => {
       await assignEmail(id, target.value);
       await refreshEmails(id);
     }, "Email assignment updated locally.");
+  }
+
+  if (target.dataset.selectDraft) {
+    const id = target.dataset.selectDraft;
+    state.selectedDraftIds = target.checked
+      ? [...new Set([...state.selectedDraftIds, id])]
+      : state.selectedDraftIds.filter((draftId) => draftId !== id);
+    render();
   }
 });
 
