@@ -5,14 +5,17 @@ import {
   approveDrafts,
   approveLowRiskDrafts,
   assignEmail,
+  createEmployee,
+  deleteEmployee,
+  deleteRule,
   generateMorningDigest,
   generateDraftReply,
-  getDraftApprovalCheck,
   getDraftDetail,
   getDraftForEmail,
   getSettings,
   getEmailThread,
   getWorkflowCompletionCheck,
+  listActivity,
   listAssistantMessages,
   listEmployees,
   listDrafts,
@@ -25,6 +28,7 @@ import {
   sendAssistantCommand,
   summarizeThread,
   toggleRule,
+  updateEmployee,
   updateRule,
   updateEmailCategory
 } from "./api/mockApi.js";
@@ -54,13 +58,16 @@ const state = {
   selectedEmail: null,
   selectedDraft: null,
   selectedRule: null,
+  selectedEmployee: null,
   selectedDraftIds: [],
   confirmDialog: null,
   digest: null,
   triageFilter: "all",
   draftFilter: "all",
+  ruleQuery: "",
   assistantOpen: false,
   assistantMessages: [],
+  activity: [],
   summary: "",
   showExplanation: false
 };
@@ -73,12 +80,24 @@ app.innerHTML = `
         <div class="brand-sub">Assistant Outlook pour PME</div>
       </div>
       <nav class="nav">
-        <button class="active" data-tab="dashboard">Overview <small>Today</small></button>
-        <button data-tab="import">Setup import <small>Microsoft 365</small></button>
-        <button data-tab="triage">Triage <small>Inbox</small></button>
-        <button data-tab="rules">Rules <small>Preview</small></button>
-        <button data-tab="drafts">Drafts <small>Approval</small></button>
-        <button data-tab="admin">Admin <small>Security</small></button>
+        <div class="nav-group">
+          <div class="nav-label">Home</div>
+          <button class="active" data-tab="dashboard">Overview <small>Today</small></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-label">Work</div>
+          <button data-tab="triage">Triage <small>Inbox</small></button>
+          <button data-tab="drafts">Drafts <small>Approval</small></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-label">Automation</div>
+          <button data-tab="rules">Rules <small>Preview</small></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-label">Workspace</div>
+          <button data-tab="import">Setup import <small>Microsoft 365</small></button>
+          <button data-tab="admin">Admin <small>Settings</small></button>
+        </div>
       </nav>
       <div class="aside-note">Courio uses fake local mailbox data in this prototype and suggests actions. It never sends email or modifies a real mailbox.</div>
     </aside>
@@ -170,7 +189,7 @@ function escapeHtml(value = "") {
 
 async function loadInitialData() {
   try {
-    const [emails, employees, rules, drafts, settings, digest, assistantMessages] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages()]);
+    const [emails, employees, rules, drafts, settings, digest, assistantMessages, activity] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity()]);
     state.emails = emails;
     state.employees = employees;
     state.rules = rules;
@@ -178,6 +197,7 @@ async function loadInitialData() {
     state.settings = { ...state.settings, ...settings };
     state.digest = digest;
     state.assistantMessages = assistantMessages;
+    state.activity = activity;
   } catch (error) {
     toast(error.message || "Could not load mock data.", true);
   } finally {
@@ -275,8 +295,8 @@ function renderImport() {
           <div class="step">
             <div class="step-num">${index + 1}</div>
             <div><strong>${step[0]}</strong><p>${step[1]}</p></div>
-            <button class="btn ${index === 0 ? "primary" : index === 3 ? "success" : "subtle"}" data-import-step="${index}" ${isBusy(`import-${index}`) ? "disabled" : ""}>
-              ${isBusy(`import-${index}`) ? "Working..." : step[2]}
+            <button class="btn subtle" disabled title="Real Microsoft 365 setup is intentionally unavailable in this fake/local prototype.">
+              Demo only
             </button>
           </div>
         `).join("")}
@@ -295,7 +315,7 @@ function renderTriage() {
   const table = state.loading.emails
     ? `<div class="loading">Loading mock inbox...</div>`
     : filteredEmails.length === 0
-      ? `<div class="empty-state">No emails match this view. Try All inbox or reset the demo data.</div>`
+      ? `<div class="empty-state">${state.triageFilter === "urgent" ? "No urgent emails. You are caught up on high-priority work." : state.triageFilter === "invoices" ? "No invoice emails are waiting for review." : "No emails are available in this local demo."}</div>`
     : `<table class="table">
         <thead><tr><th>Subject</th><th>Sender</th><th>Category</th><th>Assigned</th><th>Workflow</th><th>Status</th><th></th></tr></thead>
         <tbody>
@@ -309,7 +329,11 @@ function renderTriage() {
               <td><span class="badge ${email.status === "Done" ? "done" : ""}">${email.status}</span></td>
               <td class="actions">
                 <button class="btn subtle" data-review-email="${email.id}" ${isBusy(`review-${email.id}`) ? "disabled" : ""}>${isBusy(`review-${email.id}`) ? "Opening..." : "Review"}</button>
-                <button class="btn success" data-done-email="${email.id}" ${email.status === "Done" || isBusy(`done-${email.id}`) ? "disabled" : ""}>${email.status === "Done" ? "Completed" : isBusy(`done-${email.id}`) ? "Saving..." : "Done"}</button>
+                ${email.status === "Done"
+                  ? `<span class="status-text">Complete</span>`
+                  : email.requiresDraft
+                    ? `<span class="status-text" title="Generate, review, and approve a draft to complete this workflow.">Draft required</span>`
+                    : `<span class="status-text" title="Open the email and review its details before completing the workflow.">Review before completing</span>`}
               </td>
             </tr>
           `).join("")}
@@ -333,6 +357,11 @@ function renderTriage() {
 
 function renderDrawer() {
   const root = document.querySelector("#drawerRoot");
+  if (state.selectedEmployee) {
+    renderEmployeeDrawer(root);
+    return;
+  }
+
   if (state.selectedRule) {
     renderRuleDrawer(root);
     return;
@@ -378,6 +407,7 @@ function renderDrawer() {
         </label>
         <label>Assigned employee
           <select data-email-assignee="${email.id}">
+            <option value="" ${!email.assignedTo ? "selected" : ""}>Unassigned</option>
             ${state.employees.map((employee) => `<option value="${employee.id}" ${employee.id === email.assignedTo ? "selected" : ""}>${employee.name} - ${employee.department}</option>`).join("")}
           </select>
         </label>
@@ -418,8 +448,12 @@ function renderDrawer() {
       ${state.summary ? `<div class="drawer-section"><h3>Summary</h3><div class="preview">${state.summary}</div></div>` : ""}
       <div class="drawer-actions">
         <button class="btn primary" data-summary-email="${email.id}" ${isBusy(`summary-${email.id}`) ? "disabled" : ""}>${isBusy(`summary-${email.id}`) ? "Summarizing..." : "Summarize"}</button>
-        ${email.canOpenDraft ? `<button class="btn subtle" data-open-email-draft="${email.id}" ${isBusy(`open-email-draft-${email.id}`) ? "disabled" : ""}>${email.draftActionLabel}</button>` : `<button class="btn subtle" data-generate-draft="${email.id}" ${!email.canGenerateDraft || isBusy(`draft-${email.id}`) ? "disabled" : ""}>${isBusy(`draft-${email.id}`) ? "Drafting..." : email.draftActionLabel}</button>`}
-        <button class="btn success" data-done-email="${email.id}" ${emailDone || isBusy(`done-${email.id}`) ? "disabled" : ""}>${emailDone ? "Completed" : isBusy(`done-${email.id}`) ? "Saving..." : "Mark done"}</button>
+        ${email.canOpenDraft ? `<button class="btn subtle" data-open-email-draft="${email.id}" ${isBusy(`open-email-draft-${email.id}`) ? "disabled" : ""}>${email.draftActionLabel}</button>` : `<button class="btn subtle" data-generate-draft="${email.id}" ${!email.canGenerateDraft || isBusy(`draft-${email.id}`) ? `disabled title="${email.completionBlocker || "Draft action is unavailable."}"` : ""}>${isBusy(`draft-${email.id}`) ? "Drafting..." : email.draftActionLabel}</button>`}
+        ${emailDone
+          ? `<span class="status-text">Workflow complete</span>`
+          : email.requiresDraft
+            ? `<span class="status-text">Approving the draft completes this workflow.</span>`
+            : `<button class="btn success" data-done-email="${email.id}" ${isBusy(`done-${email.id}`) ? "disabled" : ""}>${isBusy(`done-${email.id}`) ? "Saving..." : "Mark complete"}</button>`}
       </div>
       <p class="drawer-note">This is a local prototype. Courio does not send email.</p>
     </aside>
@@ -440,7 +474,7 @@ function renderConfirmModal() {
       <h2>${dialog.title}</h2>
       <p>${dialog.message}</p>
       <div class="actions">
-        <button class="btn primary" data-confirm-primary>${dialog.primaryLabel}</button>
+        <button class="btn ${dialog.tone === "danger" ? "danger" : "primary"}" data-confirm-primary>${dialog.primaryLabel}</button>
         <button class="btn subtle" data-confirm-cancel>Cancel</button>
       </div>
     </div>
@@ -449,11 +483,6 @@ function renderConfirmModal() {
 
 async function requestDone(emailId) {
   state.confirmDialog = await getWorkflowCompletionCheck(emailId);
-  render();
-}
-
-async function requestApproveDraft(draftId) {
-  state.confirmDialog = await getDraftApprovalCheck(draftId);
   render();
 }
 
@@ -469,12 +498,16 @@ async function completeEmailWorkflow(emailId) {
   await markEmailDone(emailId);
   await refreshEmails(emailId);
   state.drafts = await listDrafts();
+  state.activity = await listActivity();
+  state.digest = await generateMorningDigest();
 }
 
 async function approveDraftWorkflow(draftId) {
   await approveDraft(draftId);
   state.drafts = await listDrafts();
   state.emails = await listEmails();
+  state.activity = await listActivity();
+  state.digest = await generateMorningDigest();
   state.selectedDraftIds = state.selectedDraftIds.filter((id) => id !== draftId);
   if (state.selectedDraft?.id === draftId) {
     state.selectedDraft = await getDraftDetail(draftId);
@@ -526,11 +559,15 @@ function renderDraftDrawer(root) {
       </div>
 
       <div class="drawer-actions">
-        <button class="btn primary" data-save-draft="${draft.id}" ${sourceDone || isBusy(`save-${draft.id}`) ? "disabled" : ""}>${sourceDone ? "Completed" : isBusy(`save-${draft.id}`) ? "Saving..." : "Save changes"}</button>
-        <button class="btn success" data-approve-draft="${draft.id}" ${sourceDone || draft.isReadyForHumanSend || isBusy(`approve-${draft.id}`) ? "disabled" : ""}>${sourceDone ? "Completed" : isBusy(`approve-${draft.id}`) ? "Approving..." : "Approve"}</button>
+        ${sourceDone
+          ? `<span class="status-text">Workflow complete. This draft is ready for human send.</span>`
+          : `
+            <button class="btn primary" data-save-draft="${draft.id}" ${isBusy(`save-${draft.id}`) ? "disabled" : ""}>${isBusy(`save-${draft.id}`) ? "Saving..." : "Save changes"}</button>
+            <button class="btn success" data-approve-draft="${draft.id}" ${!draft.canApprove || isBusy(`approve-${draft.id}`) ? `disabled title="${draft.approvalBlocker || "Save the reviewed draft before approving."}"` : ""}>${isBusy(`approve-${draft.id}`) ? "Approving..." : "Approve and complete"}</button>
+          `}
         <button class="btn subtle" data-close-drawer>Close</button>
       </div>
-      <p class="drawer-note">Approval only marks this draft as ready for a person to send. Courio never sends email.</p>
+      <p class="drawer-note">Approval completes this workflow and marks the draft ready for a person to send. Courio never sends email.</p>
     </aside>
   `;
 }
@@ -580,17 +617,55 @@ function renderRuleDrawer(root) {
 
       <div class="drawer-actions">
         <button class="btn primary" data-save-rule="${rule.id}" ${isBusy(`save-rule-${rule.id}`) ? "disabled" : ""}>${isBusy(`save-rule-${rule.id}`) ? "Saving..." : "Save rule"}</button>
+        <button class="btn danger" data-delete-rule="${rule.id}">Delete rule</button>
         <button class="btn subtle" data-close-drawer>Close</button>
       </div>
     </aside>
   `;
 }
 
+function renderEmployeeDrawer(root) {
+  const employee = state.selectedEmployee;
+  const isNew = employee.id === "new";
+
+  root.innerHTML = `
+    <div class="drawer-backdrop" data-close-drawer></div>
+    <aside class="review-drawer" aria-label="${isNew ? "Add employee" : "Edit employee"}">
+      <div class="drawer-header">
+        <div>
+          <div class="badge lead">Team member</div>
+          <h2>${isNew ? "Add employee" : "Edit employee"}</h2>
+          <p>${isNew ? "Add a local demo team member." : `Reviewing ${employee.name}`}</p>
+        </div>
+        <button class="btn subtle" data-close-drawer>Close</button>
+      </div>
+
+      <div class="drawer-section">
+        <label>Name<input data-employee-field="name" value="${escapeHtml(employee.name || "")}"></label>
+        <label>Email<input data-employee-field="email" type="email" value="${escapeHtml(employee.email || "")}"></label>
+        <label>Title<input data-employee-field="title" value="${escapeHtml(employee.title || "")}"></label>
+        <label>Department<input data-employee-field="department" value="${escapeHtml(employee.department || "")}"></label>
+      </div>
+
+      <div class="drawer-actions">
+        <button class="btn primary" data-save-employee="${employee.id}" ${isBusy(`save-employee-${employee.id}`) ? "disabled" : ""}>${isBusy(`save-employee-${employee.id}`) ? "Saving..." : isNew ? "Add employee" : "Save changes"}</button>
+        ${isNew ? "" : `<button class="btn danger" data-delete-employee="${employee.id}">Remove employee</button>`}
+        <button class="btn subtle" data-close-drawer>Close</button>
+      </div>
+      <p class="drawer-note">Employee records remain fake and local to this browser.</p>
+    </aside>
+  `;
+}
+
 function renderRules() {
+  const query = state.ruleQuery.trim().toLowerCase();
+  const filteredRules = state.rules.filter((rule) => !query || `${rule.title} ${rule.desc} ${rule.category}`.toLowerCase().includes(query));
   const content = state.loading.rules
     ? `<div class="loading">Loading suggested rules...</div>`
-    : `<div class="grid cols-2">
-        ${state.rules.map((rule) => `
+    : filteredRules.length === 0
+      ? `<div class="empty-state">${query ? `No rules match “${escapeHtml(state.ruleQuery)}”. Clear the search to see all local rules.` : "No rules yet. Local rule suggestions will appear here."}</div>`
+      : `<div class="grid cols-2">
+        ${filteredRules.map((rule) => `
           <div class="rule-card">
             <div class="rule-top">
               <div>
@@ -603,14 +678,24 @@ function renderRules() {
             <div class="preview"><strong>${rule.confidence || 80}% confidence:</strong> ${rule.explanation || "Based on local mock patterns."}</div>
             ${isAdvancedMode() ? `<div class="preview"><strong>Would match:</strong> ${(rule.matches || ["No samples"]).join(", ")}</div>` : ""}
             <div class="actions">
-              <button class="btn primary" data-approve-rule="${rule.id}" ${isBusy(`approve-rule-${rule.id}`) ? "disabled" : ""}>${isBusy(`approve-rule-${rule.id}`) ? "Approving..." : "Approve for observation"}</button>
+              ${rule.on
+                ? `<span class="status-text">In observation</span>`
+                : `<button class="btn primary" data-approve-rule="${rule.id}" ${isBusy(`approve-rule-${rule.id}`) ? "disabled" : ""}>${isBusy(`approve-rule-${rule.id}`) ? "Approving..." : "Approve for observation"}</button>`}
               <button class="btn subtle" data-edit-rule="${rule.id}" ${isBusy(`edit-rule-${rule.id}`) ? "disabled" : ""}>${isBusy(`edit-rule-${rule.id}`) ? "Opening..." : "Edit"}</button>
             </div>
           </div>
         `).join("")}
       </div>`;
 
-  document.querySelector("#rules").innerHTML = content;
+  document.querySelector("#rules").innerHTML = `
+    <div class="section-toolbar">
+      <div><h2>Suggested rules</h2><span>${filteredRules.length} shown</span></div>
+      <div class="list-toolbar">
+        <input data-rule-search type="search" value="${escapeHtml(state.ruleQuery)}" placeholder="Search rules">
+      </div>
+    </div>
+    ${content}
+  `;
 }
 
 function renderDrafts() {
@@ -625,20 +710,22 @@ function renderDrafts() {
   const content = state.loading.drafts
     ? `<div class="loading">Loading draft queue...</div>`
     : filteredDrafts.length === 0
-      ? `<div class="empty-state">No drafts match this view. Drafts appear here after Courio prepares local suggested replies.</div>`
+      ? `<div class="empty-state">${state.draftFilter === "needs_approval" ? "No drafts need approval. Reviewed drafts will appear here when they are ready." : state.draftFilter === "ready" ? "No drafts are ready for human send yet." : "No drafts are available in this local demo."}</div>`
     : `<table class="table">
         <thead><tr><th>Select</th><th>Draft</th><th>Source</th><th>Risk</th><th>Status</th><th></th></tr></thead>
         <tbody>
           ${filteredDrafts.map((draft) => `
             <tr>
-              <td><input type="checkbox" data-select-draft="${draft.id}" ${state.selectedDraftIds.includes(draft.id) ? "checked" : ""} ${!draft.canSelectForBulkApproval ? "disabled" : ""}></td>
+              <td><input type="checkbox" data-select-draft="${draft.id}" ${state.selectedDraftIds.includes(draft.id) ? "checked" : ""} ${!draft.canSelectForBulkApproval ? `disabled title="${draft.approvalBlocker || "Review and save this draft first."}"` : ""}></td>
               <td>${draft.title}</td>
               <td>${draft.source}</td>
               <td><span class="badge ${draft.risk === "High" ? "urgent" : "done"}">${draft.risk || "Low"}</span></td>
               <td><span class="badge ${draft.isReadyForHumanSend ? "done" : "pending"}">${draft.statusLabel}</span></td>
               <td class="actions">
                 <button class="btn subtle" data-review-draft="${draft.id}" ${isBusy(`review-draft-${draft.id}`) ? "disabled" : ""}>${isBusy(`review-draft-${draft.id}`) ? "Opening..." : "Review"}</button>
-                <button class="btn success" data-approve-draft="${draft.id}" ${draft.sourceEmailStatus === "Done" || draft.isReadyForHumanSend || isBusy(`approve-${draft.id}`) ? "disabled" : ""}>${draft.sourceEmailStatus === "Done" ? "Completed" : isBusy(`approve-${draft.id}`) ? "Approving..." : "Approve"}</button>
+                ${draft.isReadyForHumanSend
+                  ? `<span class="status-text">Workflow complete</span>`
+                  : `<button class="btn success" data-approve-draft="${draft.id}" ${!draft.canApprove || isBusy(`approve-${draft.id}`) ? `disabled title="${draft.approvalBlocker || "Review and save this draft first."}"` : ""}>${isBusy(`approve-${draft.id}`) ? "Approving..." : "Approve and complete"}</button>`}
               </td>
             </tr>
           `).join("")}
@@ -656,9 +743,9 @@ function renderDrafts() {
         ].map(([value, label]) => `<button class="${state.draftFilter === value ? "active" : ""}" data-draft-filter="${value}">${label}</button>`).join("")}
       </div>
       <div class="actions" style="margin-bottom:14px">
-        <button class="btn success" data-approve-selected ${selectedCount === 0 || isBusy("approve-selected") ? "disabled" : ""}>${isBusy("approve-selected") ? "Approving..." : `Approve selected (${selectedCount})`}</button>
-        <button class="btn subtle" data-approve-low-risk ${lowRiskDisabled || lowRiskPendingCount === 0 || isBusy("approve-low-risk") ? "disabled" : ""}>${lowRiskDisabled ? "Low-risk bulk approval disabled" : isBusy("approve-low-risk") ? "Approving..." : `Approve all low-risk (${lowRiskPendingCount})`}</button>
-        <span class="mode">Approval only marks drafts ready for human send</span>
+        <button class="btn success" data-approve-selected ${selectedCount === 0 || isBusy("approve-selected") ? `disabled title="${selectedCount === 0 ? "Select at least one reviewed and saved draft." : ""}"` : ""}>${isBusy("approve-selected") ? "Approving..." : `Approve selected (${selectedCount})`}</button>
+        <button class="btn subtle" data-approve-low-risk ${lowRiskDisabled || lowRiskPendingCount === 0 || isBusy("approve-low-risk") ? `disabled title="${lowRiskDisabled ? "Enable low-risk bulk approval in Advanced workspace settings." : lowRiskPendingCount === 0 ? "No reviewed low-risk drafts are ready for approval." : ""}"` : ""}>${lowRiskDisabled ? "Low-risk bulk approval disabled" : isBusy("approve-low-risk") ? "Approving..." : `Approve all low-risk (${lowRiskPendingCount})`}</button>
+        <span class="mode">Approval completes the workflow; nothing is sent</span>
       </div>
       ${lowRiskDisabled ? `<div class="preview" style="margin-bottom:14px">Low-risk bulk approval is disabled by workspace settings.</div>` : ""}
       ${content}
@@ -754,8 +841,14 @@ async function applyAssistantAction(action) {
   }
 
   if (action.type === "reset_demo_data") {
-    await resetDemoData();
-    window.location.reload();
+    state.confirmDialog = {
+      type: "reset-demo",
+      title: "Reset demo data?",
+      message: "This clears all local Courio changes and restores the original fake demo data.",
+      primaryLabel: "Reset demo data",
+      tone: "danger"
+    };
+    render();
   }
 }
 
@@ -801,19 +894,38 @@ function renderAdmin() {
         </table>
       </div>
       <div class="panel">
-        <div class="panel-title"><h2>Employee directory</h2><span>Mock team</span></div>
-        <table class="table">
-          <thead><tr><th>Name</th><th>Role</th><th>Department</th></tr></thead>
-          <tbody>
-            ${state.employees.map((employee) => `
-              <tr>
-                <td>${employee.name}<br><small>${employee.email}</small></td>
-                <td>${employee.title}</td>
-                <td>${employee.department}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
+        <div class="panel-title">
+          <div><h2>Employee directory</h2><span>Mock team</span></div>
+          <button class="btn primary" data-add-employee>Add employee</button>
+        </div>
+        ${state.employees.length === 0
+          ? `<div class="empty-state">No employees yet. Add a team member to make triage assignments available.</div>`
+          : `<table class="table">
+              <thead><tr><th>Name</th><th>Role</th><th>Department</th><th></th></tr></thead>
+              <tbody>
+                ${state.employees.map((employee) => `
+                  <tr>
+                    <td>${employee.name}<br><small>${employee.email}</small></td>
+                    <td>${employee.title}</td>
+                    <td>${employee.department}</td>
+                    <td><button class="btn subtle" data-edit-employee="${employee.id}">Edit</button></td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>`}
+      </div>
+      <div class="panel">
+        <div class="panel-title"><h2>Recent activity</h2><span>Local audit preview</span></div>
+        ${state.activity.length === 0
+          ? `<div class="empty-state">No activity yet. Completed workflows and team changes will appear here.</div>`
+          : `<div class="activity-list">
+              ${state.activity.slice(0, 8).map((item) => `
+                <div class="activity-item">
+                  <span>${escapeHtml(item.label || "Local action completed")}</span>
+                  <time>${new Date(item.completedAt).toLocaleString()}</time>
+                </div>
+              `).join("")}
+            </div>`}
       </div>
     </div>
   `;
@@ -863,6 +975,19 @@ document.addEventListener("click", async (event) => {
       return;
     }
 
+    if (dialog?.type === "review-email") {
+      await runAction(`review-${dialog.emailId}`, async () => {
+        state.selectedEmail = await getEmailThread(dialog.emailId);
+        state.emails = await listEmails();
+        state.selectedDraft = null;
+        state.selectedRule = null;
+        state.selectedEmployee = null;
+        state.summary = "";
+        state.showExplanation = false;
+      }, "Email opened for review.");
+      return;
+    }
+
     if (dialog?.type === "mark-done") {
       await runAction(`done-${dialog.emailId}`, async () => {
         await completeEmailWorkflow(dialog.emailId);
@@ -870,10 +995,32 @@ document.addEventListener("click", async (event) => {
       return;
     }
 
-    if (dialog?.type === "approve-draft") {
-      await runAction(`approve-${dialog.draftId}`, async () => {
-        await approveDraftWorkflow(dialog.draftId);
-      }, "Draft marked ready for human send. Nothing was sent.");
+    if (dialog?.type === "reset-demo") {
+      await runAction("reset-demo", async () => {
+        await resetDemoData();
+        window.location.reload();
+      });
+      return;
+    }
+
+    if (dialog?.type === "delete-rule") {
+      await runAction(`delete-rule-${dialog.ruleId}`, async () => {
+        await deleteRule(dialog.ruleId);
+        state.rules = await listRules();
+        state.activity = await listActivity();
+        state.selectedRule = null;
+      }, "Rule deleted locally.");
+      return;
+    }
+
+    if (dialog?.type === "delete-employee") {
+      await runAction(`delete-employee-${dialog.employeeId}`, async () => {
+        await deleteEmployee(dialog.employeeId);
+        state.employees = await listEmployees();
+        state.emails = await listEmails();
+        state.activity = await listActivity();
+        state.selectedEmployee = null;
+      }, "Employee removed and assigned emails returned to Unassigned.");
       return;
     }
   }
@@ -902,16 +1049,14 @@ document.addEventListener("click", async (event) => {
     }, "Morning digest regenerated from local demo data.");
   }
 
-  if (target.dataset.importStep) {
-    const key = `import-${target.dataset.importStep}`;
-    await runAction(key, () => new Promise((resolve) => setTimeout(resolve, 650)), "Setup step completed in mock mode.");
-  }
-
   if (target.dataset.reviewEmail) {
     const id = target.dataset.reviewEmail;
     await runAction(`review-${id}`, async () => {
       state.selectedEmail = await getEmailThread(id);
+      state.emails = await listEmails();
       state.selectedDraft = null;
+      state.selectedRule = null;
+      state.selectedEmployee = null;
       state.summary = "";
       state.showExplanation = false;
     }, "Message thread opened.");
@@ -922,6 +1067,8 @@ document.addEventListener("click", async (event) => {
     await runAction(`review-draft-${id}`, async () => {
       state.selectedDraft = await getDraftDetail(id);
       state.selectedEmail = null;
+      state.selectedRule = null;
+      state.selectedEmployee = null;
       state.summary = "";
       state.showExplanation = false;
     }, "Draft opened for review.");
@@ -932,6 +1079,8 @@ document.addEventListener("click", async (event) => {
     await runAction(`open-email-draft-${id}`, async () => {
       state.selectedDraft = await getDraftForEmail(id);
       state.selectedEmail = null;
+      state.selectedRule = null;
+      state.selectedEmployee = null;
       state.summary = "";
       state.showExplanation = false;
     }, "Draft opened for editing.");
@@ -941,6 +1090,7 @@ document.addEventListener("click", async (event) => {
     state.selectedEmail = null;
     state.selectedDraft = null;
     state.selectedRule = null;
+    state.selectedEmployee = null;
     state.summary = "";
     state.showExplanation = false;
     render();
@@ -1008,6 +1158,7 @@ document.addEventListener("click", async (event) => {
       state.selectedRule = state.rules.find((rule) => rule.id === id);
       state.selectedEmail = null;
       state.selectedDraft = null;
+      state.selectedEmployee = null;
     }, "Rule opened for local editing.");
   }
 
@@ -1023,11 +1174,74 @@ document.addEventListener("click", async (event) => {
     }, "Rule saved locally.");
   }
 
+  if (target.dataset.deleteRule) {
+    const id = target.dataset.deleteRule;
+    const rule = state.rules.find((item) => item.id === id);
+    state.confirmDialog = {
+      type: "delete-rule",
+      ruleId: id,
+      title: "Delete this rule?",
+      message: `Delete “${rule?.title || "this rule"}” from the local demo?`,
+      primaryLabel: "Delete rule",
+      tone: "danger"
+    };
+    render();
+  }
+
+  if (target.dataset.addEmployee !== undefined) {
+    state.selectedEmployee = {
+      id: "new",
+      name: "",
+      email: "",
+      title: "",
+      department: ""
+    };
+    state.selectedEmail = null;
+    state.selectedDraft = null;
+    state.selectedRule = null;
+    render();
+  }
+
+  if (target.dataset.editEmployee) {
+    state.selectedEmployee = state.employees.find((employee) => employee.id === target.dataset.editEmployee) || null;
+    state.selectedEmail = null;
+    state.selectedDraft = null;
+    state.selectedRule = null;
+    render();
+  }
+
+  if (target.dataset.saveEmployee) {
+    const id = target.dataset.saveEmployee;
+    const fields = Object.fromEntries(
+      [...document.querySelectorAll("[data-employee-field]")].map((input) => [input.dataset.employeeField, input.value])
+    );
+    await runAction(`save-employee-${id}`, async () => {
+      const saved = id === "new" ? await createEmployee(fields) : await updateEmployee(id, fields);
+      state.employees = await listEmployees();
+      state.activity = await listActivity();
+      state.selectedEmployee = state.employees.find((employee) => employee.id === saved.id) || null;
+    }, id === "new" ? "Employee added locally." : "Employee changes saved locally.");
+  }
+
+  if (target.dataset.deleteEmployee) {
+    const id = target.dataset.deleteEmployee;
+    const employee = state.employees.find((item) => item.id === id);
+    state.confirmDialog = {
+      type: "delete-employee",
+      employeeId: id,
+      title: "Remove this employee?",
+      message: `Remove ${employee?.name || "this employee"}? Their assigned emails will return to Unassigned.`,
+      primaryLabel: "Remove employee",
+      tone: "danger"
+    };
+    render();
+  }
+
   if (target.dataset.approveDraft) {
     const id = target.dataset.approveDraft;
-    await runAction(`check-approve-${id}`, async () => {
-      await requestApproveDraft(id);
-    });
+    await runAction(`approve-${id}`, async () => {
+      await approveDraftWorkflow(id);
+    }, "Draft approved and workflow completed. Nothing was sent.");
   }
 
   if (target.dataset.approveSelected !== undefined) {
@@ -1035,8 +1249,10 @@ document.addEventListener("click", async (event) => {
       await approveDrafts(state.selectedDraftIds);
       state.drafts = await listDrafts();
       state.emails = await listEmails();
+      state.activity = await listActivity();
+      state.digest = await generateMorningDigest();
       state.selectedDraftIds = [];
-    }, "Selected drafts marked ready for human send. Nothing was sent.");
+    }, "Selected drafts approved and workflows completed. Nothing was sent.");
   }
 
   if (target.dataset.approveLowRisk !== undefined) {
@@ -1049,8 +1265,10 @@ document.addEventListener("click", async (event) => {
       await approveLowRiskDrafts();
       state.drafts = await listDrafts();
       state.emails = await listEmails();
+      state.activity = await listActivity();
+      state.digest = await generateMorningDigest();
       state.selectedDraftIds = [];
-    }, "Low-risk drafts marked ready for human send. Nothing was sent.");
+    }, "Low-risk drafts approved and workflows completed. Nothing was sent.");
   }
 
   if (target.dataset.saveSettings !== undefined) {
@@ -1063,10 +1281,14 @@ document.addEventListener("click", async (event) => {
   }
 
   if (target.dataset.resetDemo !== undefined) {
-    await runAction("reset-demo", async () => {
-      await resetDemoData();
-      window.location.reload();
-    }, "Demo data reset.");
+    state.confirmDialog = {
+      type: "reset-demo",
+      title: "Reset demo data?",
+      message: "This clears all local Courio changes and restores the original fake demo data.",
+      primaryLabel: "Reset demo data",
+      tone: "danger"
+    };
+    render();
   }
 });
 
@@ -1108,6 +1330,17 @@ document.addEventListener("change", async (event) => {
       : state.selectedDraftIds.filter((draftId) => draftId !== id);
     render();
   }
+});
+
+document.addEventListener("input", (event) => {
+  const target = event.target;
+  if (target.dataset.ruleSearch === undefined) return;
+
+  state.ruleQuery = target.value;
+  renderRules();
+  const search = document.querySelector("[data-rule-search]");
+  search?.focus();
+  search?.setSelectionRange(state.ruleQuery.length, state.ruleQuery.length);
 });
 
 document.addEventListener("submit", async (event) => {

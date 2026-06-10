@@ -10,6 +10,8 @@ Courio is a mock-functional AI email workflow assistant for small businesses.
 - Always explain why Courio suggested an action, category, rule, or escalation.
 - Keep language simple, calm, and trustworthy for non-technical small business owners.
 - Preserve workflow integrity: one email, one workflow, one draft state.
+- Every email must follow the same workflow: review, generate draft, edit/save, approve as ready for human send, then complete automatically.
+- Future fake incoming emails must use this workflow by default and must not expose a direct completion shortcut.
 
 ## Architecture Principles
 
@@ -19,6 +21,23 @@ Courio is a mock-functional AI email workflow assistant for small businesses.
 - Keep data models close to future backend models where practical.
 - Prefer reusable production-style scaffolding over one-off UI shortcuts.
 - Use localStorage only for this prototype's fake/local persistence.
+
+## Technology Direction
+
+- Do not rewrite Courio into a new language or framework unless explicitly requested.
+- Keep the current frontend in Vite.
+- Prefer TypeScript for future frontend refactors.
+- Keep the UI dependent on clear API contracts rather than mock implementation details.
+- Keep `src/api/mockApi.js` clean and replaceable so a real backend can take over without rewriting the UI.
+- Structure request parameters, responses, validation errors, IDs, statuses, and data models to resemble a future REST API.
+
+### Future Production Target
+
+- Frontend: TypeScript with Vite/React or Next.js.
+- Backend: Django with Django REST Framework.
+- Database: PostgreSQL.
+- Do not add real Gmail, Outlook, or OpenAI integration until the mock workflows have been validated with users.
+- A future Django API should be able to replace `mockApi.js` behind the same frontend-facing contracts.
 
 ## Demo Boundaries
 

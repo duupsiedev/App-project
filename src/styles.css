@@ -69,7 +69,20 @@ aside {
 
 .nav {
   display: grid;
+  gap: 18px;
+}
+
+.nav-group {
+  display: grid;
   gap: 5px;
+}
+
+.nav-label {
+  padding: 0 12px 4px;
+  color: #748198;
+  font-size: .68rem;
+  font-weight: 750;
+  text-transform: uppercase;
 }
 
 .nav button {
@@ -243,7 +256,7 @@ h1 {
 }
 
 .btn:disabled {
-  cursor: progress;
+  cursor: not-allowed;
   opacity: .55;
 }
 
@@ -496,6 +509,42 @@ textarea {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.status-text {
+  color: var(--muted);
+  font-size: .8rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.section-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.section-toolbar h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.section-toolbar span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
+.list-toolbar {
+  width: min(320px, 100%);
+}
+
+.list-toolbar input {
+  width: 100%;
 }
 
 .segmented {
@@ -531,6 +580,29 @@ textarea {
   padding: 18px;
   color: var(--muted);
   line-height: 1.45;
+}
+
+.activity-list {
+  display: grid;
+}
+
+.activity-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: .86rem;
+}
+
+.activity-item:last-child {
+  border-bottom: 0;
+}
+
+.activity-item time {
+  color: var(--muted);
+  font-size: .78rem;
+  white-space: nowrap;
 }
 
 .drawer-backdrop {
@@ -767,6 +839,10 @@ textarea {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .nav-group {
+    align-content: start;
+  }
+
   main {
     padding: 18px;
   }
@@ -790,6 +866,16 @@ textarea {
 
   .drawer-grid {
     grid-template-columns: 1fr;
+  }
+
+  .section-toolbar,
+  .activity-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .activity-item time {
+    white-space: normal;
   }
 
   .assistant {

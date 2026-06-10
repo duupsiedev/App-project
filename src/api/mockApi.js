@@ -33,7 +33,9 @@ const defaultState = {
     approvalRequired: true,
     autoSend: false
   },
-  completedActions: []
+  completedActions: [],
+  deletedEmployeeIds: [],
+  deletedRuleIds: []
 };
 
 const state = loadState();
@@ -50,18 +52,33 @@ function loadState() {
     if (!saved) return clone(defaultState);
 
     const parsed = JSON.parse(saved);
-    return {
+    const loadedState = {
       ...clone(defaultState),
       ...parsed,
       emails: mergeById(defaultState.emails, parsed.emails),
-      employees: mergeById(defaultState.employees, parsed.employees),
-      rules: mergeById(defaultState.rules, parsed.rules),
+      employees: mergeById(
+        defaultState.employees.filter((employee) => !(parsed.deletedEmployeeIds || []).includes(employee.id)),
+        (parsed.employees || []).filter((employee) => !(parsed.deletedEmployeeIds || []).includes(employee.id))
+      ),
+      rules: mergeById(
+        defaultState.rules.filter((rule) => !(parsed.deletedRuleIds || []).includes(rule.id)),
+        (parsed.rules || []).filter((rule) => !(parsed.deletedRuleIds || []).includes(rule.id))
+      ),
       drafts: mergeById(defaultState.drafts, parsed.drafts),
       settings: {
         ...defaultState.settings,
         ...(parsed.settings || {})
       }
     };
+    loadedState.drafts.forEach((draft) => {
+      if (!draftReadyForCompletion(draft)) return;
+      const email = loadedState.emails.find((item) => item.id === (draft.emailId || draft.id));
+      if (email) {
+        email.status = "Done";
+        email.workflowStatus = "Completed";
+      }
+    });
+    return loadedState;
   } catch {
     return clone(defaultState);
   }
@@ -112,8 +129,8 @@ function lowRiskBulkApprovalEnabled() {
   return state.settings.allowLowRiskBulkApproval !== "No";
 }
 
-function actionRequiresDraft(email) {
-  return /draft|reply|follow-up|offer|escalate/i.test(email.suggestedAction);
+function actionRequiresDraft() {
+  return true;
 }
 
 function draftReadyForApproval(draft) {
@@ -122,6 +139,27 @@ function draftReadyForApproval(draft) {
 
 function draftReadyForCompletion(draft) {
   return draft.status === "Ready for human send" || draft.status === "Approved";
+}
+
+function recordActivity(type, details = {}) {
+  state.completedActions.unshift({
+    id: `action-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    type,
+    completedAt: new Date().toISOString(),
+    ...details
+  });
+  state.completedActions = state.completedActions.slice(0, 50);
+}
+
+function completeEmailFromApprovedDraft(email, draft) {
+  draft.status = "Ready for human send";
+  email.status = "Done";
+  email.workflowStatus = "Completed";
+  recordActivity("draft-approved", {
+    emailId: email.id,
+    draftId: draft.id,
+    label: `Draft approved and workflow completed: ${email.subject}`
+  });
 }
 
 function buildDraftView(draft) {
@@ -138,7 +176,7 @@ function buildDraftView(draft) {
     statusLabel: isReady ? "Ready for human send" : draft.status,
     isReadyForHumanSend: isReady,
     canApprove,
-    canSelectForBulkApproval: sourceEmailStatus !== "Done" && !isReady,
+    canSelectForBulkApproval: canApprove,
     approvalBlocker: canApprove ? "" : sourceEmailStatus === "Done" ? "Source email is completed." : "Review this draft before approving."
   };
 }
@@ -146,22 +184,35 @@ function buildDraftView(draft) {
 function buildEmailView(email) {
   const draft = findDraftByEmailId(email.id);
   const requiresDraft = actionRequiresDraft(email);
+  const draftStarted = Boolean(draft?.generated || draft?.reviewed || draftReadyForCompletion(draft || {}));
   const draftReady = draft ? draftReadyForCompletion(draft) : false;
   const isDone = email.status === "Done";
 
   return {
     ...email,
     requiresDraft,
-    draftId: draft?.id || null,
-    draftStatus: draft?.status || null,
-    draftStatusLabel: draft ? buildDraftView(draft).statusLabel : "No draft",
+    draftId: draftStarted ? draft?.id || null : null,
+    draftStatus: draftStarted ? draft?.status || null : null,
+    draftStatusLabel: draftStarted ? buildDraftView(draft).statusLabel : "No draft",
     draftReadyForHumanSend: draftReady,
-    workflowLabel: isDone ? "Completed" : draftReady ? "Draft approved" : draft?.status === "Saved" ? "Draft saved" : draft ? "Draft in review" : email.workflowStatus || "Not started",
-    canComplete: isDone ? false : !requiresDraft || draftReady,
+    workflowLabel: isDone
+      ? "Completed"
+      : !requiresDraft
+        ? email.reviewed
+          ? "Ready to complete"
+          : "Review required"
+        : draftReady
+          ? "Draft approved"
+          : draft?.status === "Saved"
+            ? "Draft saved"
+            : draftStarted
+              ? "Draft in review"
+              : "Draft needed",
+    canComplete: isDone ? false : requiresDraft ? draftReady : Boolean(email.reviewed),
     completeActionLabel: isDone ? "Completed" : "Done",
-    draftActionLabel: isDone ? "Draft locked" : draft ? draftReady ? "View approved draft" : "Edit draft" : "Generate draft",
-    canGenerateDraft: !isDone && !draft,
-    canOpenDraft: Boolean(draft),
+    draftActionLabel: isDone ? "Draft locked" : draftStarted ? draftReady ? "View approved draft" : "Edit draft" : "Generate draft",
+    canGenerateDraft: !isDone && !draftStarted,
+    canOpenDraft: draftStarted,
     completionBlocker: requiresDraft && !draftReady ? "This workflow still needs a draft before it can be completed." : ""
   };
 }
@@ -176,6 +227,17 @@ function getCompletionCheck(email) {
       title: "Complete workflow",
       message: "Mark this workflow complete?",
       primaryLabel: "Mark complete"
+    };
+  }
+
+  if (!emailView.requiresDraft) {
+    return {
+      allowed: false,
+      type: "review-email",
+      emailId: email.id,
+      title: "Review required",
+      message: "Review this email before completing the workflow.",
+      primaryLabel: "Review email"
     };
   }
 
@@ -197,29 +259,6 @@ function getCompletionCheck(email) {
     draftId: emailView.draftId,
     title: "Draft approval needed",
     message: "This workflow needs a reviewed and approved draft before it can be completed.",
-    primaryLabel: "Review draft"
-  };
-}
-
-function getApprovalCheck(draft) {
-  const draftView = buildDraftView(draft);
-  if (draftView.canApprove) {
-    return {
-      allowed: true,
-      type: "approve-draft",
-      draftId: draft.id,
-      title: "Approve draft",
-      message: "Mark this draft as ready for human send? Courio will not send it.",
-      primaryLabel: "Approve"
-    };
-  }
-
-  return {
-    allowed: false,
-    type: "review-draft",
-    draftId: draft.id,
-    title: "Review required",
-    message: "Review this draft before approving.",
     primaryLabel: "Review draft"
   };
 }
@@ -248,8 +287,9 @@ function findEmployee(id) {
 
 function buildDigest() {
   const openEmails = state.emails.filter((email) => email.status !== "Done");
-  const readyDrafts = state.drafts.filter((draft) => draft.status === "Ready for human send").length;
-  const waitingDrafts = state.drafts.filter((draft) => draft.status !== "Ready for human send" && draft.status !== "Approved").length;
+  const activeDrafts = state.drafts.filter((draft) => draft.generated || draft.reviewed || draftReadyForCompletion(draft));
+  const readyDrafts = activeDrafts.filter((draft) => draftReadyForCompletion(draft)).length;
+  const waitingDrafts = activeDrafts.filter((draft) => !draftReadyForCompletion(draft)).length;
   const byCategory = (category) => openEmails.filter((email) => email.category === category);
   const urgent = openEmails.filter((email) => email.urgency === "High");
 
@@ -384,7 +424,11 @@ export async function generateMorningDigest() {
 
 export async function listDrafts() {
   await delay(400);
-  return clone(state.drafts.map(buildDraftView));
+  return clone(
+    state.drafts
+      .filter((draft) => draft.generated || draft.reviewed || draftReadyForCompletion(draft))
+      .map(buildDraftView)
+  );
 }
 
 export async function getDraftDetail(id) {
@@ -440,23 +484,24 @@ export async function saveSettings(settings) {
 export async function resetDemoData() {
   await delay(350);
   window.localStorage.removeItem(STORAGE_KEY);
+  window.localStorage.removeItem(CHAT_STORAGE_KEY);
   return clone(defaultState);
 }
 
 export async function getEmailThread(id) {
   await delay();
   const email = findEmail(id);
+  if (!email.reviewed) {
+    email.reviewed = true;
+    email.reviewedAt = new Date().toISOString();
+    persistState();
+  }
   return clone({ ...buildEmailView(email), messages: email.thread });
 }
 
 export async function getWorkflowCompletionCheck(id) {
   await delay(250);
   return clone(getCompletionCheck(findEmail(id)));
-}
-
-export async function getDraftApprovalCheck(id) {
-  await delay(250);
-  return clone(getApprovalCheck(findDraft(id)));
 }
 
 export async function summarizeThread(id) {
@@ -527,10 +572,9 @@ export async function approveDraft(id) {
   if (!draftReadyForApproval(draft)) {
     throw new Error("Review this draft before approving.");
   }
-  draft.status = "Ready for human send";
-  email.workflowStatus = "Draft approved";
+  completeEmailFromApprovedDraft(email, draft);
   persistState();
-  return clone(draft);
+  return clone(buildDraftView(draft));
 }
 
 export async function approveDrafts(ids) {
@@ -555,8 +599,7 @@ export async function approveDrafts(ids) {
 
   const approved = [];
   for (const { draft, email } of candidates) {
-    draft.status = "Ready for human send";
-    email.workflowStatus = "Draft approved";
+    completeEmailFromApprovedDraft(email, draft);
     approved.push(draft.id);
   }
 
@@ -572,7 +615,7 @@ export async function approveLowRiskDrafts() {
 
   const lowRiskIds = state.drafts
     .filter((draft) => draft.risk !== "High")
-    .filter((draft) => draft.status !== "Ready for human send" && draft.status !== "Approved")
+    .filter(draftReadyForApproval)
     .filter((draft) => findEmail(draft.emailId || draft.id).status !== "Done")
     .map((draft) => draft.id);
 
@@ -606,20 +649,35 @@ export async function updateRule(id, updates) {
   return clone(rule);
 }
 
+export async function deleteRule(id) {
+  await delay(450);
+  const index = state.rules.findIndex((item) => item.id === id);
+  if (index === -1) throw new Error("Rule not found.");
+  const [deleted] = state.rules.splice(index, 1);
+  state.deletedRuleIds = [...new Set([...(state.deletedRuleIds || []), id])];
+  recordActivity("rule-deleted", {
+    ruleId: deleted.id,
+    label: `Rule deleted: ${deleted.title}`
+  });
+  persistState();
+  return clone(deleted);
+}
+
 export async function markEmailDone(id) {
   await delay();
   const email = findEmail(id);
   const draft = findDraftByEmailId(id);
+  if (!actionRequiresDraft(email) && !email.reviewed) {
+    throw new Error("Review this email before completing the workflow.");
+  }
   if (actionRequiresDraft(email) && !draftReadyForCompletion(draft || {})) {
     throw new Error("This workflow still needs a draft before it can be completed.");
   }
   email.status = "Done";
   email.workflowStatus = "Completed";
-  state.completedActions.push({
-    id: `action-${Date.now()}`,
-    type: "email-done",
+  recordActivity("email-done", {
     emailId: id,
-    completedAt: new Date().toISOString()
+    label: `Workflow completed: ${email.subject}`
   });
   persistState();
   return clone(email);
@@ -636,11 +694,74 @@ export async function updateEmailCategory(id, category) {
 
 export async function assignEmail(id, employeeId) {
   await delay(400);
-  findEmployee(employeeId);
+  if (employeeId) findEmployee(employeeId);
   const email = findEmail(id);
   email.assignedTo = employeeId;
   persistState();
   return clone(email);
+}
+
+export async function createEmployee(employee) {
+  await delay(500);
+  if (!employee.name?.trim()) throw new Error("Employee name is required.");
+  if (!employee.email?.trim()) throw new Error("Employee email is required.");
+  if (!employee.title?.trim()) throw new Error("Employee title is required.");
+  if (!employee.department?.trim()) throw new Error("Employee department is required.");
+
+  const created = {
+    id: `employee-${Date.now()}`,
+    name: employee.name.trim(),
+    email: employee.email.trim(),
+    title: employee.title.trim(),
+    department: employee.department.trim()
+  };
+  state.employees.push(created);
+  recordActivity("employee-added", {
+    employeeId: created.id,
+    label: `Employee added: ${created.name}`
+  });
+  persistState();
+  return clone(created);
+}
+
+export async function updateEmployee(id, updates) {
+  await delay(500);
+  const employee = findEmployee(id);
+  if (!updates.name?.trim()) throw new Error("Employee name is required.");
+  if (!updates.email?.trim()) throw new Error("Employee email is required.");
+  if (!updates.title?.trim()) throw new Error("Employee title is required.");
+  if (!updates.department?.trim()) throw new Error("Employee department is required.");
+
+  Object.assign(employee, {
+    name: updates.name.trim(),
+    email: updates.email.trim(),
+    title: updates.title.trim(),
+    department: updates.department.trim()
+  });
+  persistState();
+  return clone(employee);
+}
+
+export async function deleteEmployee(id) {
+  await delay(500);
+  const index = state.employees.findIndex((item) => item.id === id);
+  if (index === -1) throw new Error("Employee not found.");
+  const [deleted] = state.employees.splice(index, 1);
+  state.deletedEmployeeIds = [...new Set([...(state.deletedEmployeeIds || []), id])];
+  state.emails.forEach((email) => {
+    if (email.assignedTo === id) email.assignedTo = "";
+  });
+  recordActivity("employee-deleted", {
+    employeeId: deleted.id,
+    label: `Employee removed: ${deleted.name}`
+  });
+  persistState();
+  return clone(deleted);
+}
+
+export async function listActivity() {
+  await delay(250);
+  return clone(state.completedActions);
 }
 
 export async function listAssistantMessages() {
