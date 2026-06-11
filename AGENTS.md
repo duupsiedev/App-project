@@ -2,6 +2,21 @@
 
 Courio is a mock-functional AI email workflow assistant for small businesses.
 
+## Decision Authority
+
+When project guidance conflicts, use this priority order:
+
+1. Safety, legal, platform, and explicitly approved billing constraints.
+2. The user's latest explicit instruction.
+3. Product Principles.
+4. User Trust Rule.
+5. Architecture and State Management rules.
+6. Other project guidance.
+
+Resolve minor ambiguity using the existing architecture, product principles, and established design patterns.
+
+Ask for clarification when an assumption could materially affect workflows, costs, safety, data contracts, integrations, or the approved visual direction.
+
 ## Product Principles
 
 - Never auto-send emails.
@@ -65,17 +80,20 @@ When in doubt, the API/state layer owns the data and the UI renders it.
 - Do not add real Gmail, Outlook, or OpenAI integration until the mock workflows have been validated with users.
 - A future Django API should be able to replace `mockApi.js` behind the same frontend-facing contracts.
 
-## Future-Proofing Requirements
+## Future-Proofing and Migration Mindset
 
 Courio's current build is the foundation for the future production product, not a disposable prototype.
 
-- Do not create throwaway code when a reusable production-style solution is reasonable.
+- Assume every mock feature may eventually become a real feature.
+- Avoid throwaway code when a reusable production-style solution is reasonable.
 - Do not bypass the existing architecture for convenience.
 - Prefer extending existing systems over creating parallel systems.
 - Avoid duplicate sources of truth.
 - Avoid hardcoded workflow logic in UI components.
 - Avoid tightly coupling screens to local mock implementations.
 - Design new features so a future backend can replace the mock layer with minimal frontend changes.
+- Use realistic data structures, statuses, IDs, and API contracts.
+- Preserve boundaries that allow mock implementations to be replaced rather than untangled from the UI.
 
 The architecture should allow:
 
@@ -84,6 +102,8 @@ The architecture should allow:
 - PostgreSQL to replace localStorage.
 - Authentication to be added later.
 - These replacements without requiring a full frontend rewrite.
+
+Avoid mock implementations that would need to be completely rewritten later.
 
 ## Data Model Stability
 
@@ -97,20 +117,6 @@ When modifying data structures:
 - Include a migration or compatibility strategy for persisted local data when applicable.
 
 Future integrations will depend on stable models and predictable contracts.
-
-## Migration Mindset
-
-Assume every mock feature may eventually become a real feature.
-
-When building mock functionality:
-
-- Use realistic data structures.
-- Use realistic statuses.
-- Use realistic IDs.
-- Use realistic API contracts.
-- Preserve boundaries that allow mock implementations to be replaced rather than untangled from the UI.
-
-Avoid mock implementations that would need to be completely rewritten later.
 
 ## Design Preservation Rules
 
@@ -155,7 +161,7 @@ A smaller, complete feature is preferred over a larger unfinished feature.
 When modifying existing systems:
 
 - Prefer small incremental changes over large rewrites.
-- Do not rewrite working systems without a clear benefit.
+- Avoid rewriting working systems unless there is a clear product, maintenance, architectural, reliability, or user-experience benefit.
 - Preserve existing behavior unless the change explicitly intends to alter it.
 - Keep changes closely scoped to the requested workflow and affected modules.
 
