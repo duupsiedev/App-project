@@ -813,6 +813,13 @@ textarea {
   border-top: 1px solid var(--border);
 }
 
+.assistant-hint {
+  margin: -4px 12px 12px;
+  color: var(--muted);
+  font-size: .75rem;
+  line-height: 1.35;
+}
+
 .assistant-fab {
   width: 54px;
   height: 54px;

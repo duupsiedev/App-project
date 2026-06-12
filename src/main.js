@@ -34,6 +34,7 @@ import {
 } from "./api/mockApi.js";
 
 const app = document.querySelector("#app");
+const VALID_TABS = new Set(["dashboard", "import", "triage", "rules", "drafts", "admin"]);
 
 const state = {
   tab: "dashboard",
@@ -153,8 +154,24 @@ function toast(message, isError = false) {
   toastEl.dataset.timer = window.setTimeout(() => toastEl.classList.remove("show"), 2400);
 }
 
-function switchTab(tab) {
+function navigateTo(tab, options = {}) {
+  if (!VALID_TABS.has(tab)) {
+    throw new Error("That Courio section is unavailable.");
+  }
+
   state.tab = tab;
+  if (options.triageFilter) state.triageFilter = options.triageFilter;
+  if (options.draftFilter) state.draftFilter = options.draftFilter;
+
+  if (options.closeDrawers !== false) {
+    state.selectedEmail = null;
+    state.selectedDraft = null;
+    state.selectedRule = null;
+    state.selectedEmployee = null;
+    state.summary = "";
+    state.showExplanation = false;
+  }
+
   render();
 }
 
@@ -781,6 +798,7 @@ function renderAssistant() {
             <input data-assistant-input placeholder="Show urgent emails" autocomplete="off" ${isBusy("assistant") ? "disabled" : ""}>
             <button class="btn primary" type="submit" ${isBusy("assistant") ? "disabled" : ""}>${isBusy("assistant") ? "Working..." : "Send"}</button>
           </form>
+          <p class="assistant-hint">Try: urgent emails, drafts, invoices, digest, invoice rule, or reset.</p>
         </div>
       ` : ""}
       <button class="assistant-fab" data-assistant-toggle aria-label="Open Courio assistant">
@@ -794,27 +812,18 @@ async function applyAssistantAction(action) {
   if (!action) return;
 
   if (action.type === "show_triage") {
-    state.tab = "triage";
-    state.triageFilter = action.filter || "all";
-    state.selectedDraft = null;
-    state.selectedRule = null;
-    render();
+    navigateTo("triage", { triageFilter: action.filter || "all" });
     return;
   }
 
   if (action.type === "show_drafts") {
-    state.tab = "drafts";
-    state.draftFilter = action.filter || "all";
-    state.selectedEmail = null;
-    state.selectedRule = null;
-    render();
+    navigateTo("drafts", { draftFilter: action.filter || "all" });
     return;
   }
 
   if (action.type === "generate_digest") {
-    state.digest = action.digest || await generateMorningDigest();
-    state.tab = "dashboard";
-    render();
+    state.digest = await generateMorningDigest();
+    navigateTo("dashboard");
     return;
   }
 
@@ -822,11 +831,10 @@ async function applyAssistantAction(action) {
     state.selectedEmail = await getEmailThread(action.emailId);
     state.selectedDraft = null;
     state.selectedRule = null;
+    state.selectedEmployee = null;
     state.summary = "";
     state.showExplanation = true;
-    state.tab = "triage";
-    state.triageFilter = "all";
-    render();
+    navigateTo("triage", { triageFilter: "all", closeDrawers: false });
     return;
   }
 
@@ -835,8 +843,8 @@ async function applyAssistantAction(action) {
     state.selectedRule = state.rules.find((rule) => rule.id === action.ruleId) || null;
     state.selectedEmail = null;
     state.selectedDraft = null;
-    state.tab = "rules";
-    render();
+    state.selectedEmployee = null;
+    navigateTo("rules", { closeDrawers: false });
     return;
   }
 
@@ -1026,11 +1034,11 @@ document.addEventListener("click", async (event) => {
   }
 
   if (target.dataset.tab) {
-    switchTab(target.dataset.tab);
+    navigateTo(target.dataset.tab);
   }
 
   if (target.dataset.tabTarget) {
-    switchTab(target.dataset.tabTarget);
+    navigateTo(target.dataset.tabTarget);
   }
 
   if (target.dataset.triageFilter) {

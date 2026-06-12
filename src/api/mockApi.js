@@ -211,9 +211,13 @@ function buildEmailView(email) {
     canComplete: isDone ? false : requiresDraft ? draftReady : Boolean(email.reviewed),
     completeActionLabel: isDone ? "Completed" : "Done",
     draftActionLabel: isDone ? "Draft locked" : draftStarted ? draftReady ? "View approved draft" : "Edit draft" : "Generate draft",
-    canGenerateDraft: !isDone && !draftStarted,
+    canGenerateDraft: !isDone && Boolean(email.reviewed) && !draftStarted,
     canOpenDraft: draftStarted,
-    completionBlocker: requiresDraft && !draftReady ? "This workflow still needs a draft before it can be completed." : ""
+    completionBlocker: !email.reviewed
+      ? "Review this email before generating a draft."
+      : requiresDraft && !draftReady
+        ? "This workflow still needs a draft before it can be completed."
+        : ""
   };
 }
 
@@ -335,20 +339,86 @@ function getOrCreateInvoiceRule() {
   return rule;
 }
 
+function normalizeAssistantMessage(message) {
+  return message
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function editDistance(left, right) {
+  const rows = Array.from({ length: right.length + 1 }, (_, index) => index);
+
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    let previous = rows[0];
+    rows[0] = leftIndex;
+
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const current = rows[rightIndex];
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      rows[rightIndex] = Math.min(
+        rows[rightIndex] + 1,
+        rows[rightIndex - 1] + 1,
+        previous + substitutionCost
+      );
+      previous = current;
+    }
+  }
+
+  return rows[right.length];
+}
+
+function isAdjacentSwap(left, right) {
+  if (left.length !== right.length) return false;
+
+  const differences = [];
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) differences.push(index);
+  }
+
+  return differences.length === 2
+    && differences[1] === differences[0] + 1
+    && left[differences[0]] === right[differences[1]]
+    && left[differences[1]] === right[differences[0]];
+}
+
+function assistantMessageMatches(message, aliases) {
+  const tokens = message.split(" ").filter(Boolean);
+
+  return aliases.some((alias) => {
+    if (alias.includes(" ")) return message.includes(alias);
+
+    return tokens.some((token) => {
+      if (token === alias) return true;
+      if (isAdjacentSwap(token, alias)) return true;
+      const tolerance = alias.length >= 7 ? 2 : alias.length >= 4 ? 1 : 0;
+      return tolerance > 0 && Math.abs(token.length - alias.length) <= tolerance && editDistance(token, alias) <= tolerance;
+    });
+  });
+}
+
 function answerAssistantCommand(rawMessage, context = {}) {
-  const message = rawMessage.trim().toLowerCase();
+  const message = normalizeAssistantMessage(rawMessage);
   const urgentCount = state.emails.filter((email) => email.status !== "Done" && email.urgency === "High").length;
   const invoiceCount = state.emails.filter((email) => email.status !== "Done" && email.category === "Accounting").length;
-  const waitingDrafts = state.drafts.filter((draft) => !draftReadyForCompletion(draft) && findEmail(draft.emailId || draft.id).status !== "Done").length;
+  const waitingDrafts = state.drafts
+    .map(buildDraftView)
+    .filter((draft) => draft.canSelectForBulkApproval)
+    .length;
+  const mentionsInvoice = assistantMessageMatches(message, ["invoice", "invoices", "accounting"]);
+  const mentionsRule = assistantMessageMatches(message, ["rule", "rules", "create rule"]);
 
-  if (/urgent/.test(message)) {
+  if (assistantMessageMatches(message, ["urgent", "urgency"])) {
     return {
       text: `${urgentCount} urgent emails are open. I switched Triage to urgent items.`,
       action: { type: "show_triage", filter: "urgent" }
     };
   }
 
-  if (/invoice|invoices|accounting/.test(message) && /create|rule/.test(message)) {
+  if (mentionsInvoice && mentionsRule) {
     const rule = getOrCreateInvoiceRule();
     return {
       text: `Invoice rule is ready in observation mode. It is still fake/local and will not touch a mailbox.`,
@@ -356,28 +426,28 @@ function answerAssistantCommand(rawMessage, context = {}) {
     };
   }
 
-  if (/invoice|invoices|accounting/.test(message)) {
+  if (mentionsInvoice) {
     return {
       text: `${invoiceCount} invoice-related emails are open. I switched Triage to Accounting.`,
       action: { type: "show_triage", filter: "invoices" }
     };
   }
 
-  if (/draft/.test(message) && /approval|approve|need|waiting/.test(message)) {
+  if (assistantMessageMatches(message, ["draft", "drafts", "approval", "approve"])) {
     return {
       text: `${waitingDrafts} drafts need human review or approval. I opened the Drafts queue.`,
       action: { type: "show_drafts", filter: "needs_approval" }
     };
   }
 
-  if (/digest|morning/.test(message)) {
+  if (assistantMessageMatches(message, ["digest", "morning digest"])) {
     return {
       text: "I regenerated the morning digest from local demo data.",
-      action: { type: "generate_digest", digest: buildDigest() }
+      action: { type: "generate_digest" }
     };
   }
 
-  if (/explain|why/.test(message)) {
+  if (assistantMessageMatches(message, ["explain", "explanation", "why"])) {
     if (!context.selectedEmailId) {
       return {
         text: "Open an email in Triage first, then ask me to explain it. I will show the flagged reason."
@@ -390,7 +460,7 @@ function answerAssistantCommand(rawMessage, context = {}) {
     };
   }
 
-  if (/reset/.test(message) && /demo|data/.test(message)) {
+  if (assistantMessageMatches(message, ["reset", "restart"])) {
     return {
       text: "I can reset the fake demo data now. The page will reload so defaults come back clean.",
       action: { type: "reset_demo_data" }
@@ -398,7 +468,7 @@ function answerAssistantCommand(rawMessage, context = {}) {
   }
 
   return {
-    text: "Try: Show urgent emails, Show invoices, Show drafts needing approval, Generate digest, Explain selected email, Create invoice rule, or Reset demo data."
+    text: "I did not catch that. Try one of the command hints below."
   };
 }
 
@@ -435,6 +505,9 @@ export async function getDraftDetail(id) {
   await delay(450);
   const draft = findDraft(id);
   const email = findEmail(draft.emailId || draft.id);
+  if (!draft.generated) {
+    throw new Error("Generate this draft before reviewing it.");
+  }
   if (draft.generated && !draft.reviewed) {
     draft.reviewed = true;
     persistState();
@@ -515,6 +588,9 @@ export async function generateDraftReply(id) {
   if (email.status === "Done") {
     throw new Error("This email is done. Reopen it before creating or changing a draft.");
   }
+  if (!email.reviewed) {
+    throw new Error("Review this email before generating a draft.");
+  }
 
   let draft = findDraftByEmailId(id);
   if (!draft) {
@@ -552,10 +628,14 @@ export async function saveDraft(id, draftText) {
   if (email.status === "Done") {
     throw new Error("This email is done. Reopen it before editing the draft.");
   }
+  if (!draft.generated) {
+    throw new Error("Generate this draft before saving it.");
+  }
+  if (!draft.reviewed) {
+    throw new Error("Review this draft before saving it.");
+  }
 
   draft.text = draftText;
-  draft.generated = true;
-  draft.reviewed = true;
   draft.status = "Saved";
   email.workflowStatus = "Draft saved";
   persistState();
