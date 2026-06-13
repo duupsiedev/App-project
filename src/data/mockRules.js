@@ -2,11 +2,11 @@ export const mockRules = [
   {
     id: "rule-1",
     title: "Supplier invoice routing",
-    desc: "Categorize supplier invoices and payment requests, then notify the accounting contact.",
+    desc: "Suggest an accounting category and owner for supplier invoices and payment requests.",
     category: "Accounting",
     confidence: 91,
     explanation: "Courio looks for invoice numbers, payment wording, supplier senders, and due-date language.",
-    impact: "Would have matched 31 messages this month.",
+    impact: "Matches the sample invoice messages in this local demo.",
     matches: ["Invoice #1844 payment status", "Supplier payment confirmation"],
     on: true
   },
@@ -17,7 +17,7 @@ export const mockRules = [
     category: "Client complaint",
     confidence: 94,
     explanation: "Courio looks for negative sentiment, repeated follow-ups, and requests for owner attention.",
-    impact: "Would have flagged 4 high-risk threads in the last 14 days.",
+    impact: "Flags the sample high-risk client thread in this local demo.",
     matches: ["Very unhappy about no response"],
     on: true
   },
@@ -28,7 +28,7 @@ export const mockRules = [
     category: "Sales",
     confidence: 86,
     explanation: "Courio looks for pricing requests, new prospect language, and service-fit details.",
-    impact: "Would have prepared 6 drafts this month.",
+    impact: "Matches the sample quote request in this local demo.",
     matches: ["Quote request for monthly bookkeeping"],
     on: false
   },

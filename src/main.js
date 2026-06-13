@@ -48,6 +48,7 @@ const state = {
     approvalRequired: true,
     autoSend: false
   },
+  settingsForm: null,
   loading: {
     emails: true,
     rules: true,
@@ -76,7 +77,7 @@ app.innerHTML = `
     <aside>
       <div class="brand">
         <div class="brand-title">Courio</div>
-        <div class="brand-sub">Assistant Outlook pour PME</div>
+        <div class="brand-sub">Assistant courriel pour PME</div>
       </div>
       <nav class="nav">
         <div class="nav-group">
@@ -94,7 +95,7 @@ app.innerHTML = `
         </div>
         <div class="nav-group">
           <div class="nav-label">Workspace</div>
-          <button data-tab="import">Setup import <small>Microsoft 365</small></button>
+          <button data-tab="import">Setup preview <small>Microsoft 365</small></button>
           <button data-tab="admin">Admin <small>Settings</small></button>
         </div>
       </nav>
@@ -157,6 +158,14 @@ function navigateTo(tab, options = {}) {
     throw new Error("That Courio section is unavailable.");
   }
 
+  const previousTab = state.tab;
+  if (previousTab === "admin" && tab !== "admin") {
+    state.settingsForm = null;
+  }
+  if (tab === "admin" && previousTab !== "admin") {
+    state.settingsForm = { ...state.settings };
+  }
+
   state.tab = tab;
   if (options.triageFilter) state.triageFilter = options.triageFilter;
   if (options.draftFilter) state.draftFilter = options.draftFilter;
@@ -202,6 +211,18 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#039;");
 }
 
+function escapeList(items = []) {
+  return items.map((item) => escapeHtml(item)).join(", ");
+}
+
+function getSettingsForm() {
+  return state.settingsForm || { ...state.settings };
+}
+
+function isAdvancedSettingsForm() {
+  return getSettingsForm().mode === "Advanced";
+}
+
 async function loadInitialData() {
   try {
     const [emails, employees, rules, drafts, settings, digest, assistantMessages, activity] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity()]);
@@ -210,6 +231,7 @@ async function loadInitialData() {
     state.rules = rules;
     state.drafts = drafts;
     state.settings = { ...state.settings, ...settings };
+    state.settingsForm = null;
     state.digest = digest;
     state.assistantMessages = assistantMessages;
     state.activity = activity;
@@ -267,15 +289,15 @@ function renderDashboard() {
     </div>
     <div class="grid cols-2" style="margin-top:16px">
       <div class="panel">
-        <div class="panel-title"><h2>Morning digest</h2><span>${digest ? `Generated ${digest.generatedAt}` : "Loading..."}</span></div>
-        <p class="subtitle">${digest ? digest.headline : "Preparing a local demo digest from mock emails and drafts."}</p>
+        <div class="panel-title"><h2>Morning digest</h2><span>${digest ? `Generated ${escapeHtml(digest.generatedAt)}` : "Loading..."}</span></div>
+        <p class="subtitle">${digest ? escapeHtml(digest.headline) : "Preparing a local demo digest from mock emails and drafts."}</p>
         ${digest ? `
           <table class="table" style="margin-top:14px">
-            <tr><td>Urgent items</td><td>${digest.urgentItems.length ? digest.urgentItems.join(", ") : "None"}</td></tr>
-            <tr><td>Invoices</td><td>${digest.invoices.length ? digest.invoices.join(", ") : "None"}</td></tr>
-            <tr><td>Missing documents</td><td>${digest.missingDocuments.length ? digest.missingDocuments.join(", ") : "None"}</td></tr>
-            <tr><td>Quote requests</td><td>${digest.quoteRequests.length ? digest.quoteRequests.join(", ") : "None"}</td></tr>
-            <tr><td>Client complaints</td><td>${digest.clientComplaints.length ? digest.clientComplaints.join(", ") : "None"}</td></tr>
+            <tr><td>Urgent items</td><td>${digest.urgentItems.length ? escapeList(digest.urgentItems) : "None"}</td></tr>
+            <tr><td>Invoices</td><td>${digest.invoices.length ? escapeList(digest.invoices) : "None"}</td></tr>
+            <tr><td>Missing documents</td><td>${digest.missingDocuments.length ? escapeList(digest.missingDocuments) : "None"}</td></tr>
+            <tr><td>Quote requests</td><td>${digest.quoteRequests.length ? escapeList(digest.quoteRequests) : "None"}</td></tr>
+            <tr><td>Client complaints</td><td>${digest.clientComplaints.length ? escapeList(digest.clientComplaints) : "None"}</td></tr>
           </table>
         ` : ""}
         <div class="actions" style="margin-top:14px">
@@ -286,7 +308,7 @@ function renderDashboard() {
       <div class="panel">
         <div class="panel-title"><h2>Recommended next actions</h2><span>${digest?.recommendedActions.length || 0} items</span></div>
         <table class="table">
-          ${(digest?.recommendedActions || ["Digest is loading."]).map((item) => `<tr><td><span class="badge lead">Action</span></td><td>${item}</td></tr>`).join("")}
+          ${(digest?.recommendedActions || ["Digest is loading."]).map((item) => `<tr><td><span class="badge lead">Action</span></td><td>${escapeHtml(item)}</td></tr>`).join("")}
           ${isAdvancedMode() ? `<tr><td><span class="badge invoice">Advanced</span></td><td>${state.rules.filter((rule) => rule.on).length} rules are currently enabled.</td></tr>` : ""}
         </table>
       </div>
@@ -296,20 +318,20 @@ function renderDashboard() {
 
 function renderImport() {
   const steps = [
-    ["Connect Microsoft 365", "Admin authorizes access to selected Outlook mailboxes, folders, categories, and contacts.", "Connect"],
-    ["Import mailbox structure", "Courio detects folders, categories, shared mailboxes, frequent senders, and existing work habits.", "Import"],
-    ["Generate workflow suggestions", "Suggested triage rules are created but remain inactive until approved.", "View suggestions"],
-    ["Run in observation mode", "The system previews actions for one week before any mailbox changes are enabled.", "Enable"]
+    ["Preview Microsoft 365 connection", "Shows how an admin could later choose Outlook mailboxes, folders, categories, and contacts. No account is connected now."],
+    ["Preview mailbox import", "Demonstrates the mailbox structure and workflow patterns Courio could import after a real integration is approved."],
+    ["Preview workflow suggestions", "Generates local suggestions from fake demo messages. No mailbox rules are created."],
+    ["Preview observation mode", "Shows how suggested actions could be reviewed before any future mailbox integration is enabled."]
   ];
 
   document.querySelector("#import").innerHTML = `
     <div class="panel">
-      <div class="panel-title"><h2>Microsoft 365 setup import</h2><span>Designed to reduce switching friction</span></div>
+      <div class="panel-title"><h2>Microsoft 365 setup preview</h2><span>Simulated locally</span></div>
       <div class="workflow">
         ${steps.map((step, index) => `
           <div class="step">
             <div class="step-num">${index + 1}</div>
-            <div><strong>${step[0]}</strong><p>${step[1]}</p></div>
+            <div><strong>${escapeHtml(step[0])}</strong><p>${escapeHtml(step[1])}</p></div>
             <button class="btn subtle" disabled title="Real Microsoft 365 setup is intentionally unavailable in this fake/local prototype.">
               Demo only
             </button>
@@ -336,12 +358,16 @@ function renderTriage() {
         <tbody>
           ${filteredEmails.map((email) => `
             <tr>
-              <td>${email.subject}</td>
-              <td>${email.sender}<br><small>${email.senderEmail || ""}</small></td>
-              <td><span class="badge ${badgeClass(email.category)}">${email.category}</span><br><small>${email.urgency || "Medium"} urgency - ${email.confidence || 80}% confidence</small></td>
-              <td>${employeeById[email.assignedTo]?.name || "Unassigned"}</td>
-              <td>${email.workflowLabel || "Not started"}</td>
-              <td><span class="badge ${email.status === "Done" ? "done" : ""}">${email.status}</span></td>
+              <td>${escapeHtml(email.subject)}</td>
+              <td>${escapeHtml(email.sender)}<br><small>${escapeHtml(email.senderEmail || "")}</small></td>
+              <td>
+                <span class="badge ${badgeClass(email.category)}">${escapeHtml(email.category)}</span><br>
+                <small>${escapeHtml(email.urgency || "Medium")} urgency - ${email.confidence || 80}% confidence</small>
+                <small class="triage-reason" title="${escapeHtml(email.explanation || "")}">Why: ${escapeHtml(email.explanation || "Matched the current local category rules.")}</small>
+              </td>
+              <td>${escapeHtml(employeeById[email.assignedTo]?.name || "Unassigned")}</td>
+              <td>${escapeHtml(email.workflowLabel || "Not started")}</td>
+              <td><span class="badge ${email.status === "Done" ? "done" : ""}">${escapeHtml(email.status)}</span></td>
               <td class="actions">
                 <button class="btn subtle" data-review-email="${email.id}" ${isBusy(`review-${email.id}`) ? "disabled" : ""}>${isBusy(`review-${email.id}`) ? "Opening..." : "Review"}</button>
                 ${email.status === "Done"
@@ -400,16 +426,16 @@ function renderDrawer() {
     <aside class="review-drawer" aria-label="Email review">
       <div class="drawer-header">
         <div>
-          <div class="badge ${badgeClass(email.category)}">${email.category}</div>
-          <h2>${email.subject}</h2>
-          <p>${email.sender} - ${email.senderEmail}</p>
+          <div class="badge ${badgeClass(email.category)}">${escapeHtml(email.category)}</div>
+          <h2>${escapeHtml(email.subject)}</h2>
+          <p>${escapeHtml(email.sender)} - ${escapeHtml(email.senderEmail)}</p>
         </div>
         <button class="btn subtle" data-close-drawer>Close</button>
       </div>
 
       <div class="drawer-section">
         <h3>Email body</h3>
-        <div class="preview">${email.body}</div>
+        <div class="preview">${escapeHtml(email.body)}</div>
       </div>
 
       <div class="drawer-grid">
@@ -421,44 +447,45 @@ function renderDrawer() {
         <label>Assigned employee
           <select data-email-assignee="${email.id}">
             <option value="" ${!email.assignedTo ? "selected" : ""}>Unassigned</option>
-            ${state.employees.map((employee) => `<option value="${employee.id}" ${employee.id === email.assignedTo ? "selected" : ""}>${employee.name} - ${employee.department}</option>`).join("")}
+            ${state.employees.map((employee) => `<option value="${escapeHtml(employee.id)}" ${employee.id === email.assignedTo ? "selected" : ""}>${escapeHtml(employee.name)} - ${escapeHtml(employee.department)}</option>`).join("")}
           </select>
         </label>
       </div>
 
       <div class="drawer-grid">
-        <div class="mini-stat"><span>Urgency</span><strong>${email.urgency}</strong></div>
+        <div class="mini-stat"><span>Urgency</span><strong>${escapeHtml(email.urgency)}</strong></div>
         <div class="mini-stat"><span>Confidence</span><strong>${email.confidence}%</strong></div>
-        <div class="mini-stat"><span>Status</span><strong>${email.status}</strong></div>
-        <div class="mini-stat"><span>Owner</span><strong>${assignedEmployee?.name || "Unassigned"}</strong></div>
+        <div class="mini-stat"><span>Status</span><strong>${escapeHtml(email.status)}</strong></div>
+        <div class="mini-stat"><span>Owner</span><strong>${escapeHtml(assignedEmployee?.name || "Unassigned")}</strong></div>
       </div>
 
       <div class="drawer-section">
         <h3>Draft workflow</h3>
         <div class="preview">
-          ${emailDone ? "This email is completed. Draft actions are locked unless the email is reopened later." : email.draftId ? `${email.draftReadyForHumanSend ? "Draft approved and ready for human send." : `Draft exists: ${email.draftStatusLabel}.`} One email uses one draft record.` : "No active draft exists for this email."}
+          ${emailDone ? "This email is completed. Draft actions are locked unless the email is reopened later." : email.draftId ? `${email.draftReadyForHumanSend ? "Draft approved and ready for human send." : `Draft exists: ${escapeHtml(email.draftStatusLabel)}.`} One email uses one draft record.` : "No active draft exists for this email."}
         </div>
       </div>
 
       <div class="drawer-section">
         <h3>Suggested action</h3>
-        <div class="preview">${email.suggestedAction}</div>
+        <div class="preview">${escapeHtml(email.suggestedAction)}</div>
       </div>
 
       <div class="drawer-section">
         <div class="panel-title compact-title">
           <h3>Why was this flagged?</h3>
-          <button class="btn subtle" data-toggle-explanation>${state.showExplanation ? "Hide" : "Show"}</button>
+          <button class="btn subtle" data-toggle-explanation>${state.showExplanation ? "Less context" : "More context"}</button>
         </div>
-        ${state.showExplanation ? `<div class="preview">${email.explanation}</div>` : ""}
+        <div class="preview">${escapeHtml(email.explanation)}</div>
+        ${state.showExplanation ? `<div class="preview explanation-detail">This recommendation is based only on wording and patterns in the local demo message. A person must review it before acting.</div>` : ""}
       </div>
 
       <div class="drawer-section">
         <h3>Thread</h3>
-        <ul>${email.messages.map((message) => `<li>${message}</li>`).join("")}</ul>
+        <ul>${email.messages.map((message) => `<li>${escapeHtml(message)}</li>`).join("")}</ul>
       </div>
 
-      ${state.summary ? `<div class="drawer-section"><h3>Summary</h3><div class="preview">${state.summary}</div></div>` : ""}
+      ${state.summary ? `<div class="drawer-section"><h3>Summary</h3><div class="preview">${escapeHtml(state.summary)}</div></div>` : ""}
       <div class="drawer-actions">
         <button class="btn primary" data-summary-email="${email.id}" ${isBusy(`summary-${email.id}`) ? "disabled" : ""}>${isBusy(`summary-${email.id}`) ? "Summarizing..." : "Summarize"}</button>
         ${email.canOpenDraft ? `<button class="btn subtle" data-open-email-draft="${email.id}" ${isBusy(`open-email-draft-${email.id}`) ? "disabled" : ""}>${email.draftActionLabel}</button>` : `<button class="btn subtle" data-generate-draft="${email.id}" ${!email.canGenerateDraft || isBusy(`draft-${email.id}`) ? `disabled title="${email.completionBlocker || "Draft action is unavailable."}"` : ""}>${isBusy(`draft-${email.id}`) ? "Drafting..." : email.draftActionLabel}</button>`}
@@ -482,10 +509,10 @@ function renderConfirmModal() {
   root.innerHTML = `
     <div class="modal-backdrop"></div>
     <div class="confirm-modal" role="dialog" aria-modal="true">
-      <h2>${dialog.title}</h2>
-      <p>${dialog.message}</p>
+      <h2>${escapeHtml(dialog.title)}</h2>
+      <p>${escapeHtml(dialog.message)}</p>
       <div class="actions">
-        <button class="btn ${dialog.tone === "danger" ? "danger" : "primary"}" data-confirm-primary>${dialog.primaryLabel}</button>
+        <button class="btn ${dialog.tone === "danger" ? "danger" : "primary"}" data-confirm-primary>${escapeHtml(dialog.primaryLabel)}</button>
         <button class="btn subtle" data-confirm-cancel>Cancel</button>
       </div>
     </div>
@@ -522,9 +549,9 @@ function renderDraftDrawer(root) {
     <aside class="review-drawer" aria-label="Draft review">
       <div class="drawer-header">
         <div>
-          <div class="badge ${draft.isReadyForHumanSend ? "done" : "pending"}">${draft.statusLabel}</div>
-          <h2>${draft.title}</h2>
-          <p>Source: ${sourceEmail.subject || draft.source}</p>
+          <div class="badge ${draft.isReadyForHumanSend ? "done" : "pending"}">${escapeHtml(draft.statusLabel)}</div>
+          <h2>${escapeHtml(draft.title)}</h2>
+          <p>Source: ${escapeHtml(sourceEmail.subject || draft.source)}</p>
         </div>
         <button class="btn subtle" data-close-drawer>Close</button>
       </div>
@@ -532,27 +559,27 @@ function renderDraftDrawer(root) {
       <div class="drawer-section">
         <h3>Source email</h3>
         <div class="preview">
-          <strong>${sourceEmail.sender || "Mock sender"}</strong><br>
-          ${sourceEmail.senderEmail || ""}<br><br>
-          ${sourceEmail.body || "This draft is based on a local mock email."}
+          <strong>${escapeHtml(sourceEmail.sender || "Mock sender")}</strong><br>
+          ${escapeHtml(sourceEmail.senderEmail || "")}<br><br>
+          ${escapeHtml(sourceEmail.body || "This draft is based on a local mock email.")}
         </div>
       </div>
 
       <div class="drawer-grid">
-        <div class="mini-stat"><span>Status</span><strong>${sourceDone ? "Completed" : draft.statusLabel}</strong></div>
-        <div class="mini-stat"><span>Risk level</span><strong>${draft.risk || "Low"}</strong></div>
+        <div class="mini-stat"><span>Status</span><strong>${escapeHtml(sourceDone ? "Completed" : draft.statusLabel)}</strong></div>
+        <div class="mini-stat"><span>Risk level</span><strong>${escapeHtml(draft.risk || "Low")}</strong></div>
         <div class="mini-stat"><span>Confidence</span><strong>${draft.confidence || sourceEmail.confidence || 80}%</strong></div>
         <div class="mini-stat"><span>Sending</span><strong>Never automatic</strong></div>
       </div>
 
       <div class="drawer-section">
         <h3>Suggested reply</h3>
-        <div class="preview">${sourceEmail.suggestedAction || draft.title}</div>
+        <div class="preview">${escapeHtml(sourceEmail.suggestedAction || draft.title)}</div>
       </div>
 
       <div class="drawer-section">
         <label>Editable draft body
-          <textarea data-draft-editor>${draft.text}</textarea>
+          <textarea data-draft-editor>${escapeHtml(draft.text)}</textarea>
         </label>
       </div>
 
@@ -587,8 +614,8 @@ function renderRuleDrawer(root) {
       </div>
 
       <div class="drawer-section">
-        <label>Rule name<input data-rule-field="title" value="${rule.title}"></label>
-        <label>Description<textarea data-rule-field="desc">${rule.desc}</textarea></label>
+        <label>Rule name<input data-rule-field="title" value="${escapeHtml(rule.title)}"></label>
+        <label>Description<textarea data-rule-field="desc">${escapeHtml(rule.desc)}</textarea></label>
         <label>Category
           <select data-rule-field="category">
             ${categories.map((category) => `<option value="${category}" ${category === rule.category ? "selected" : ""}>${category}</option>`).join("")}
@@ -603,12 +630,12 @@ function renderRuleDrawer(root) {
 
       <div class="drawer-section">
         <h3>Why Courio suggested it</h3>
-        <div class="preview">${rule.explanation || "This rule is based on repeated wording patterns in the mock inbox."}</div>
+        <div class="preview">${escapeHtml(rule.explanation || "This rule is based on repeated wording patterns in the mock inbox.")}</div>
       </div>
 
       <div class="drawer-section">
         <h3>Match preview</h3>
-        <ul>${(rule.matches || ["No sample matches yet."]).map((match) => `<li>${match}</li>`).join("")}</ul>
+        <ul>${(rule.matches || ["No sample matches yet."]).map((match) => `<li>${escapeHtml(match)}</li>`).join("")}</ul>
       </div>
 
       ${isAdvancedMode() ? `<div class="drawer-section"><h3>Advanced preview</h3><div class="preview">This rule uses the current confidence threshold of ${state.settings.confidenceThreshold || 80}%. No mailbox changes happen in the prototype.</div></div>` : ""}
@@ -633,7 +660,7 @@ function renderEmployeeDrawer(root) {
         <div>
           <div class="badge lead">Team member</div>
           <h2>${isNew ? "Add employee" : "Edit employee"}</h2>
-          <p>${isNew ? "Add a local demo team member." : `Reviewing ${employee.name}`}</p>
+          <p>${isNew ? "Add a local demo team member." : `Reviewing ${escapeHtml(employee.name)}`}</p>
         </div>
         <button class="btn subtle" data-close-drawer>Close</button>
       </div>
@@ -667,14 +694,14 @@ function renderRules() {
           <div class="rule-card">
             <div class="rule-top">
               <div>
-                <div class="rule-title">${rule.title}</div>
-                <div class="rule-desc">${rule.desc}</div>
+                <div class="rule-title">${escapeHtml(rule.title)}</div>
+                <div class="rule-desc">${escapeHtml(rule.desc)}</div>
               </div>
-              <button class="toggle ${rule.on ? "on" : ""}" aria-label="Toggle ${rule.title}" data-toggle-rule="${rule.id}" ${isBusy(`rule-${rule.id}`) ? "disabled" : ""}></button>
+              <button class="toggle ${rule.on ? "on" : ""}" aria-label="Toggle ${escapeHtml(rule.title)}" data-toggle-rule="${rule.id}" ${isBusy(`rule-${rule.id}`) ? "disabled" : ""}></button>
             </div>
-            <div class="preview">${rule.impact}</div>
-            <div class="preview"><strong>${rule.confidence || 80}% confidence:</strong> ${rule.explanation || "Based on local mock patterns."}</div>
-            ${isAdvancedMode() ? `<div class="preview"><strong>Would match:</strong> ${(rule.matches || ["No samples"]).join(", ")}</div>` : ""}
+            <div class="preview"><strong>Local sample preview:</strong> ${escapeHtml(rule.impact)}</div>
+            <div class="preview"><strong>${rule.confidence || 80}% confidence:</strong> ${escapeHtml(rule.explanation || "Based on local mock patterns.")}</div>
+            ${isAdvancedMode() ? `<div class="preview"><strong>Would match:</strong> ${escapeList(rule.matches || ["No samples"])}</div>` : ""}
             <div class="actions">
               ${rule.on
                 ? `<span class="status-text">In observation</span>`
@@ -715,10 +742,10 @@ function renderDrafts() {
           ${filteredDrafts.map((draft) => `
             <tr>
               <td><input type="checkbox" data-select-draft="${draft.id}" ${state.selectedDraftIds.includes(draft.id) ? "checked" : ""} ${!draft.canSelectForBulkApproval ? `disabled title="${draft.approvalBlocker || "Review and save this draft first."}"` : ""}></td>
-              <td>${draft.title}</td>
-              <td>${draft.source}</td>
-              <td><span class="badge ${draft.risk === "High" ? "urgent" : "done"}">${draft.risk || "Low"}</span></td>
-              <td><span class="badge ${draft.isReadyForHumanSend ? "done" : "pending"}">${draft.statusLabel}</span></td>
+              <td>${escapeHtml(draft.title)}</td>
+              <td>${escapeHtml(draft.source)}</td>
+              <td><span class="badge ${draft.risk === "High" ? "urgent" : "done"}">${escapeHtml(draft.risk || "Low")}</span></td>
+              <td><span class="badge ${draft.isReadyForHumanSend ? "done" : "pending"}">${escapeHtml(draft.statusLabel)}</span></td>
               <td class="actions">
                 <button class="btn subtle" data-review-draft="${draft.id}" ${isBusy(`review-draft-${draft.id}`) ? "disabled" : ""}>${isBusy(`review-draft-${draft.id}`) ? "Opening..." : "Review"}</button>
                 ${draft.isReadyForHumanSend
@@ -842,29 +869,30 @@ async function applyAssistantAction(action) {
 }
 
 function renderAdmin() {
+  const formSettings = getSettingsForm();
   document.querySelector("#admin").innerHTML = `
     <div class="grid cols-2">
       <div class="panel">
         <div class="panel-title"><h2>Workspace settings</h2><span>Prototype</span></div>
         <div class="form-grid">
-          <label>Company name<input data-setting="companyName" value="${state.settings.companyName || "Demo PME Inc."}"></label>
+          <label>Company name<input data-setting="companyName" value="${escapeHtml(formSettings.companyName || "Demo PME Inc.")}"></label>
           <label>Mode
             <select data-setting="mode">
-              ${["Simple", "Advanced"].map((mode) => `<option ${mode === state.settings.mode ? "selected" : ""}>${mode}</option>`).join("")}
+              ${["Simple", "Advanced"].map((mode) => `<option ${mode === formSettings.mode ? "selected" : ""}>${mode}</option>`).join("")}
             </select>
           </label>
-          <label>Escalation recipient<input data-setting="escalationRecipient" value="${state.settings.escalationRecipient || "owner@company.ca"}"></label>
-          ${isAdvancedMode() ? `
+          <label>Escalation recipient<input data-setting="escalationRecipient" value="${escapeHtml(formSettings.escalationRecipient || "owner@company.ca")}"></label>
+          ${isAdvancedSettingsForm() ? `
           <label>Default mode
             <select data-setting="defaultMode">
-              ${["Observation only", "Drafts allowed, no auto-send", "Auto-categorize after approval"].map((mode) => `<option ${mode === state.settings.defaultMode ? "selected" : ""}>${mode}</option>`).join("")}
+              ${["Observation only", "Drafts allowed, no auto-send", "Auto-categorize after approval"].map((mode) => `<option ${mode === formSettings.defaultMode ? "selected" : ""}>${mode}</option>`).join("")}
             </select>
           </label>
-          <label>Confidence threshold<input data-setting="confidenceThreshold" value="${state.settings.confidenceThreshold || "80"}"></label>
-          <label>Observation days<input data-setting="observationDays" value="${state.settings.observationDays || "7"}"></label>
+          <label>Confidence threshold<input data-setting="confidenceThreshold" value="${escapeHtml(formSettings.confidenceThreshold || "80")}"></label>
+          <label>Observation days<input data-setting="observationDays" value="${escapeHtml(formSettings.observationDays || "7")}"></label>
           <label>Low-risk bulk approval
             <select data-setting="allowLowRiskBulkApproval">
-              ${["Yes", "No"].map((value) => `<option ${value === state.settings.allowLowRiskBulkApproval ? "selected" : ""}>${value}</option>`).join("")}
+              ${["Yes", "No"].map((value) => `<option ${value === formSettings.allowLowRiskBulkApproval ? "selected" : ""}>${value}</option>`).join("")}
             </select>
           </label>
           ` : `<div class="preview">Simple Mode keeps settings focused: company name, escalation recipient, and no automatic sending.</div>`}
@@ -873,13 +901,13 @@ function renderAdmin() {
         </div>
       </div>
       <div class="panel">
-        <div class="panel-title"><h2>Security controls</h2><span>Client-facing language</span></div>
+        <div class="panel-title"><h2>Safety preview</h2><span>Prototype behavior</span></div>
         <table class="table">
-          <tr><td>No automatic sending</td><td>Enabled by default</td></tr>
-          <tr><td>Audit log</td><td>All approved actions recorded</td></tr>
-          <tr><td>Admin disconnect</td><td>Available at any time</td></tr>
-          <tr><td>Least-privilege access</td><td>Mailbox permissions reviewed during setup</td></tr>
-          <tr><td>Current mode</td><td>${state.settings.mode || "Simple"}</td></tr>
+          <tr><td>No automatic sending</td><td>Enforced in this local demo</td></tr>
+          <tr><td>Activity history</td><td>Simulated actions stored in this browser</td></tr>
+          <tr><td>Account disconnect</td><td>Planned for a future provider integration</td></tr>
+          <tr><td>Mailbox permissions</td><td>Not requested or connected in this prototype</td></tr>
+          <tr><td>Saved workspace mode</td><td>${escapeHtml(state.settings.mode || "Simple")}</td></tr>
         </table>
       </div>
       <div class="panel">
@@ -894,9 +922,9 @@ function renderAdmin() {
               <tbody>
                 ${state.employees.map((employee) => `
                   <tr>
-                    <td>${employee.name}<br><small>${employee.email}</small></td>
-                    <td>${employee.title}</td>
-                    <td>${employee.department}</td>
+                    <td>${escapeHtml(employee.name)}<br><small>${escapeHtml(employee.email)}</small></td>
+                    <td>${escapeHtml(employee.title)}</td>
+                    <td>${escapeHtml(employee.department)}</td>
                     <td><button class="btn subtle" data-edit-employee="${employee.id}">Edit</button></td>
                   </tr>
                 `).join("")}
@@ -1222,6 +1250,7 @@ document.addEventListener("click", async (event) => {
     );
     await runAction("settings", async () => {
       state.settings = await saveSettings(settings);
+      state.settingsForm = { ...state.settings };
     }, "Settings saved locally.");
   }
 
@@ -1240,15 +1269,12 @@ document.addEventListener("click", async (event) => {
 document.addEventListener("change", async (event) => {
   const target = event.target;
 
-  if (target.dataset.setting === "mode") {
-    state.settings.mode = target.value;
-    render();
-    return;
-  }
-
-  if (target.dataset.setting === "allowLowRiskBulkApproval") {
-    state.settings.allowLowRiskBulkApproval = target.value;
-    render();
+  if (target.dataset.setting !== undefined) {
+    state.settingsForm = {
+      ...getSettingsForm(),
+      [target.dataset.setting]: target.value
+    };
+    if (target.dataset.setting === "mode") render();
     return;
   }
 
@@ -1279,6 +1305,14 @@ document.addEventListener("change", async (event) => {
 
 document.addEventListener("input", (event) => {
   const target = event.target;
+  if (target.dataset.setting !== undefined) {
+    state.settingsForm = {
+      ...getSettingsForm(),
+      [target.dataset.setting]: target.value
+    };
+    return;
+  }
+
   if (target.dataset.ruleSearch === undefined) return;
 
   state.ruleQuery = target.value;

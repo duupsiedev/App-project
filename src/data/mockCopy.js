@@ -1,11 +1,11 @@
 export const copy = {
   dashboard: [
     "Overview",
-    "A professional workflow layer for Outlook: triage, summaries, routing suggestions, and draft preparation for small and mid-sized businesses."
+    "A local workflow preview for email triage, summaries, routing suggestions, and draft preparation."
   ],
   import: [
-    "Setup import",
-    "Import the client's Microsoft 365 mailbox structure, categories, contacts, and existing workflow patterns."
+    "Setup preview",
+    "Preview how a future Microsoft 365 connection could import mailbox structure and workflow patterns."
   ],
   triage: [
     "Inbox triage",
@@ -13,14 +13,14 @@ export const copy = {
   ],
   rules: [
     "Rules",
-    "Approve or adjust suggested workflow rules before they affect the mailbox."
+    "Approve or adjust local rule previews. They do not affect a real mailbox."
   ],
   drafts: [
     "Drafts",
-    "Review prepared replies before they are sent through Outlook."
+    "Review prepared replies and mark them ready for a person to send."
   ],
   admin: [
     "Admin",
-    "Control approval modes, escalation, security, and Microsoft 365 access."
+    "Manage local workspace preferences and preview future integration safeguards."
   ]
 };
