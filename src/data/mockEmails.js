@@ -11,7 +11,6 @@ export const mockEmails = [
     suggestedAction: "Escalate to owner",
     requiresDraft: true,
     assignedTo: "emp-1",
-    status: "Open",
     explanation: "Courio flagged this because the client mentions repeated follow-ups, no response, and asks for senior attention today.",
     thread: [
       "Client followed up twice about an unanswered service issue.",
@@ -32,7 +31,6 @@ export const mockEmails = [
     suggestedAction: "Route to accounting",
     requiresDraft: true,
     assignedTo: "emp-2",
-    status: "Open",
     explanation: "Courio saw an invoice number, payment-status wording, and a due-date reference, so it suggested accounting review.",
     thread: [
       "Supplier asks whether invoice #1844 has been scheduled for payment.",
@@ -53,7 +51,6 @@ export const mockEmails = [
     suggestedAction: "Prepare intake draft",
     requiresDraft: true,
     assignedTo: "emp-3",
-    status: "Open",
     explanation: "Courio matched this to sales because the sender asks for pricing, describes company needs, and appears to be a new prospect.",
     thread: [
       "New prospect requested pricing for monthly bookkeeping.",
@@ -74,7 +71,6 @@ export const mockEmails = [
     suggestedAction: "Apply payroll category",
     requiresDraft: true,
     assignedTo: "emp-4",
-    status: "Open",
     explanation: "Courio detected payroll wording and an attachment reference, so it suggested categorizing this for payroll review.",
     thread: [
       "Client attached payroll documents for this period.",
@@ -95,7 +91,6 @@ export const mockEmails = [
     suggestedAction: "Prepare follow-up draft",
     requiresDraft: true,
     assignedTo: "emp-2",
-    status: "Open",
     explanation: "Courio flagged this because the email talks about receipts and a possibly missing attachment, which usually needs a document follow-up.",
     thread: [
       "Client mentions March receipts but no attachments are present.",
@@ -116,7 +111,6 @@ export const mockEmails = [
     suggestedAction: "Offer available times",
     requiresDraft: true,
     assignedTo: "emp-5",
-    status: "Open",
     explanation: "Courio identified a scheduling change request with a proposed new time, so it suggested a simple scheduling reply.",
     thread: [
       "Client asks to move an appointment from tomorrow to next Tuesday afternoon.",

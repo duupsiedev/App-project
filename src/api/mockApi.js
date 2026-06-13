@@ -4,23 +4,25 @@ import { mockRules } from "../data/mockRules.js";
 
 const STORAGE_KEY = "courio.mockState.v1";
 const CHAT_STORAGE_KEY = "courio.assistantHistory.v1";
+const STATE_SCHEMA_VERSION = 2;
+
+const WORKFLOW_STATE = Object.freeze({
+  NEEDS_REVIEW: "needs_review",
+  READY_FOR_DRAFT: "ready_for_draft",
+  DRAFT_GENERATED: "draft_generated",
+  DRAFT_REVIEWED: "draft_reviewed",
+  DRAFT_SAVED: "draft_saved",
+  COMPLETED: "completed"
+});
+
+const WORKFLOW_STATES = new Set(Object.values(WORKFLOW_STATE));
 
 const defaultState = {
-  emails: structuredClone(mockEmails),
+  schemaVersion: STATE_SCHEMA_VERSION,
+  emails: mockEmails.map(createDefaultEmail),
   employees: structuredClone(mockEmployees),
   rules: structuredClone(mockRules),
-  drafts: mockEmails.map((email) => ({
-    id: email.id,
-    emailId: email.id,
-    title: email.suggestedAction,
-    source: email.subject,
-    text: email.draft,
-    confidence: email.confidence,
-    risk: email.urgency === "High" ? "High" : "Low",
-    generated: false,
-    reviewed: false,
-    status: "Needs approval"
-  })),
+  drafts: [],
   settings: {
     productName: "Courio",
     mode: "Simple",
@@ -46,56 +48,177 @@ function clone(value) {
   return structuredClone(value);
 }
 
+function createDefaultEmail(email) {
+  const {
+    status: _status,
+    workflowStatus: _workflowStatus,
+    reviewed: _reviewed,
+    ...emailData
+  } = clone(email);
+
+  return {
+    ...emailData,
+    workflowState: WORKFLOW_STATE.NEEDS_REVIEW
+  };
+}
+
 function loadState() {
   try {
     const saved = window.localStorage.getItem(STORAGE_KEY);
     if (!saved) return clone(defaultState);
 
     const parsed = JSON.parse(saved);
-    const loadedState = {
-      ...clone(defaultState),
-      ...parsed,
-      emails: mergeById(defaultState.emails, parsed.emails),
-      employees: mergeById(
-        defaultState.employees.filter((employee) => !(parsed.deletedEmployeeIds || []).includes(employee.id)),
-        (parsed.employees || []).filter((employee) => !(parsed.deletedEmployeeIds || []).includes(employee.id))
-      ),
-      rules: mergeById(
-        defaultState.rules.filter((rule) => !(parsed.deletedRuleIds || []).includes(rule.id)),
-        (parsed.rules || []).filter((rule) => !(parsed.deletedRuleIds || []).includes(rule.id))
-      ),
-      drafts: mergeById(defaultState.drafts, parsed.drafts),
-      settings: {
-        ...defaultState.settings,
-        ...(parsed.settings || {})
-      }
-    };
-    loadedState.drafts.forEach((draft) => {
-      if (!draftReadyForCompletion(draft)) return;
-      const email = loadedState.emails.find((item) => item.id === (draft.emailId || draft.id));
-      if (email) {
-        email.status = "Done";
-        email.workflowStatus = "Completed";
-      }
-    });
-    return loadedState;
+    const migrated = migrateState(parsed);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+    return migrated;
   } catch {
     return clone(defaultState);
   }
 }
 
+function migrateState(parsed) {
+  const deletedEmployeeIds = parsed.deletedEmployeeIds || [];
+  const deletedRuleIds = parsed.deletedRuleIds || [];
+  const mergedEmails = mergeById(defaultState.emails, parsed.emails);
+  const savedDrafts = Array.isArray(parsed.drafts) ? parsed.drafts : [];
+  const canonicalDrafts = selectCanonicalDrafts(savedDrafts);
+  const emails = mergedEmails.map((email) => {
+    const legacyDraft = canonicalDrafts.find((draft) => (draft.emailId || draft.id) === email.id);
+    const workflowState = inferWorkflowState(email, legacyDraft, parsed.schemaVersion);
+    const {
+      status: _status,
+      workflowStatus: _workflowStatus,
+      reviewed: _reviewed,
+      ...emailData
+    } = email;
+
+    return {
+      ...emailData,
+      workflowState
+    };
+  });
+  const emailById = new Map(emails.map((email) => [email.id, email]));
+  const drafts = canonicalDrafts
+    .filter((draft) => shouldPreserveDraft(draft, emailById.get(draft.emailId || draft.id)))
+    .map(normalizeDraft);
+
+  return {
+    ...clone(defaultState),
+    ...parsed,
+    schemaVersion: STATE_SCHEMA_VERSION,
+    emails,
+    employees: mergeById(
+      defaultState.employees.filter((employee) => !deletedEmployeeIds.includes(employee.id)),
+      (parsed.employees || []).filter((employee) => !deletedEmployeeIds.includes(employee.id))
+    ),
+    rules: mergeById(
+      defaultState.rules.filter((rule) => !deletedRuleIds.includes(rule.id)),
+      (parsed.rules || []).filter((rule) => !deletedRuleIds.includes(rule.id))
+    ),
+    drafts,
+    settings: {
+      ...defaultState.settings,
+      ...(parsed.settings || {})
+    },
+    completedActions: Array.isArray(parsed.completedActions) ? parsed.completedActions : [],
+    deletedEmployeeIds,
+    deletedRuleIds
+  };
+}
+
+function inferWorkflowState(email, draft, schemaVersion) {
+  if (schemaVersion >= STATE_SCHEMA_VERSION && WORKFLOW_STATES.has(email.workflowState)) {
+    return email.workflowState;
+  }
+
+  if (
+    email.status === "Done"
+    || email.workflowStatus === "Completed"
+    || draft?.status === "Ready for human send"
+    || draft?.status === "Approved"
+  ) {
+    return WORKFLOW_STATE.COMPLETED;
+  }
+  if (draft?.status === "Saved") return WORKFLOW_STATE.DRAFT_SAVED;
+  if (draft?.reviewed) return WORKFLOW_STATE.DRAFT_REVIEWED;
+  if (draft?.generated || draft?.status === "Generated") return WORKFLOW_STATE.DRAFT_GENERATED;
+  if (email.reviewed || email.reviewedAt) return WORKFLOW_STATE.READY_FOR_DRAFT;
+  return WORKFLOW_STATE.NEEDS_REVIEW;
+}
+
+function selectCanonicalDrafts(drafts) {
+  const draftByEmailId = new Map();
+
+  for (const draft of drafts) {
+    const emailId = draft?.emailId || draft?.id;
+    if (!emailId) continue;
+    const current = draftByEmailId.get(emailId);
+    if (!current || legacyDraftRank(draft) > legacyDraftRank(current)) {
+      draftByEmailId.set(emailId, draft);
+    }
+  }
+
+  return [...draftByEmailId.values()];
+}
+
+function legacyDraftRank(draft) {
+  const statusRanks = {
+    "Needs approval": 0,
+    Generated: 1,
+    Saved: 3,
+    "Ready for human send": 4,
+    Approved: 4
+  };
+  return (statusRanks[draft.status] || 0) + (draft.generated ? 1 : 0) + (draft.reviewed ? 1 : 0);
+}
+
+function shouldPreserveDraft(draft, email) {
+  if (!draft || !email) return false;
+  return Boolean(
+    draft.generated
+    || draft.reviewed
+    || ["Generated", "Saved", "Ready for human send", "Approved"].includes(draft.status)
+    || [
+      WORKFLOW_STATE.DRAFT_GENERATED,
+      WORKFLOW_STATE.DRAFT_REVIEWED,
+      WORKFLOW_STATE.DRAFT_SAVED,
+      WORKFLOW_STATE.COMPLETED
+    ].includes(email.workflowState)
+  );
+}
+
+function normalizeDraft(draft) {
+  const {
+    generated: _generated,
+    reviewed: _reviewed,
+    status: _status,
+    ...draftData
+  } = clone(draft);
+
+  return {
+    ...draftData,
+    emailId: draft.emailId || draft.id
+  };
+}
+
 function mergeById(defaultItems, savedItems = []) {
+  const safeSavedItems = Array.isArray(savedItems) ? savedItems : [];
   const mergedDefaults = defaultItems.map((defaultItem) => {
-    const savedItem = savedItems.find((item) => item.id === defaultItem.id);
+    const savedItem = safeSavedItems.find((item) => item.id === defaultItem.id);
     return savedItem ? { ...defaultItem, ...savedItem } : clone(defaultItem);
   });
-  const savedOnlyItems = savedItems.filter((savedItem) => !defaultItems.some((defaultItem) => defaultItem.id === savedItem.id));
+  const savedOnlyItems = safeSavedItems.filter((savedItem) => !defaultItems.some((defaultItem) => defaultItem.id === savedItem.id));
   return [...mergedDefaults, ...savedOnlyItems.map(clone)];
 }
 
 function persistState() {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
+
+/*
+ * Existing v1 state used draft flags and display labels as workflow state.
+ * loadState migrates those records once and keeps the original storage key.
+ */
 
 function loadAssistantHistory() {
   try {
@@ -133,12 +256,35 @@ function actionRequiresDraft() {
   return true;
 }
 
-function draftReadyForApproval(draft) {
-  return draft.generated && draft.reviewed && draft.status === "Saved";
+function emailIsComplete(email) {
+  return email.workflowState === WORKFLOW_STATE.COMPLETED;
 }
 
-function draftReadyForCompletion(draft) {
-  return draft.status === "Ready for human send" || draft.status === "Approved";
+function draftReadyForApproval(draft) {
+  const email = state.emails.find((item) => item.id === (draft.emailId || draft.id));
+  return email?.workflowState === WORKFLOW_STATE.DRAFT_SAVED;
+}
+
+function workflowLabel(workflowState) {
+  const labels = {
+    [WORKFLOW_STATE.NEEDS_REVIEW]: "Review required",
+    [WORKFLOW_STATE.READY_FOR_DRAFT]: "Draft needed",
+    [WORKFLOW_STATE.DRAFT_GENERATED]: "Draft generated",
+    [WORKFLOW_STATE.DRAFT_REVIEWED]: "Draft in review",
+    [WORKFLOW_STATE.DRAFT_SAVED]: "Draft saved",
+    [WORKFLOW_STATE.COMPLETED]: "Completed"
+  };
+  return labels[workflowState] || "Review required";
+}
+
+function draftStatusLabel(workflowState) {
+  const labels = {
+    [WORKFLOW_STATE.DRAFT_GENERATED]: "Generated",
+    [WORKFLOW_STATE.DRAFT_REVIEWED]: "In review",
+    [WORKFLOW_STATE.DRAFT_SAVED]: "Saved",
+    [WORKFLOW_STATE.COMPLETED]: "Ready for human send"
+  };
+  return labels[workflowState] || "No draft";
 }
 
 function recordActivity(type, details = {}) {
@@ -152,9 +298,9 @@ function recordActivity(type, details = {}) {
 }
 
 function completeEmailFromApprovedDraft(email, draft) {
-  draft.status = "Ready for human send";
-  email.status = "Done";
-  email.workflowStatus = "Completed";
+  email.workflowState = WORKFLOW_STATE.COMPLETED;
+  draft.approvedAt = new Date().toISOString();
+  draft.updatedAt = draft.approvedAt;
   recordActivity("draft-approved", {
     emailId: email.id,
     draftId: draft.id,
@@ -164,87 +310,67 @@ function completeEmailFromApprovedDraft(email, draft) {
 
 function buildDraftView(draft) {
   const email = state.emails.find((item) => item.id === (draft.emailId || draft.id));
-  const sourceEmailStatus = email?.status || "Open";
-  const isReady = draftReadyForCompletion(draft);
-  const canApprove = sourceEmailStatus !== "Done" && draftReadyForApproval(draft);
+  const sourceEmailStatus = emailIsComplete(email || {}) ? "Done" : "Open";
+  const isReady = emailIsComplete(email || {});
+  const canApprove = email?.workflowState === WORKFLOW_STATE.DRAFT_SAVED;
+  const statusLabel = draftStatusLabel(email?.workflowState);
 
   return {
     ...draft,
     sourceEmailStatus,
-    sourceWorkflowStatus: email?.workflowStatus || "",
-    approvalState: isReady ? "ready_for_human_send" : draft.status === "Saved" ? "saved" : draft.status === "Generated" ? "generated" : "needs_review",
-    statusLabel: isReady ? "Ready for human send" : draft.status,
+    sourceWorkflowStatus: workflowLabel(email?.workflowState),
+    approvalState: isReady
+      ? "ready_for_human_send"
+      : email?.workflowState === WORKFLOW_STATE.DRAFT_SAVED
+        ? "saved"
+        : email?.workflowState === WORKFLOW_STATE.DRAFT_GENERATED
+          ? "generated"
+          : "needs_review",
+    status: statusLabel,
+    statusLabel,
     isReadyForHumanSend: isReady,
     canApprove,
     canSelectForBulkApproval: canApprove,
-    approvalBlocker: canApprove ? "" : sourceEmailStatus === "Done" ? "Source email is completed." : "Review this draft before approving."
+    approvalBlocker: canApprove ? "" : isReady ? "Source email is completed." : "Review and save this draft before approving."
   };
 }
 
 function buildEmailView(email) {
   const draft = findDraftByEmailId(email.id);
   const requiresDraft = actionRequiresDraft(email);
-  const draftStarted = Boolean(draft?.generated || draft?.reviewed || draftReadyForCompletion(draft || {}));
-  const draftReady = draft ? draftReadyForCompletion(draft) : false;
-  const isDone = email.status === "Done";
+  const draftStarted = Boolean(draft);
+  const draftReady = emailIsComplete(email);
+  const isDone = draftReady;
+  const isReviewed = email.workflowState !== WORKFLOW_STATE.NEEDS_REVIEW;
 
   return {
     ...email,
+    reviewed: isReviewed,
+    status: isDone ? "Done" : "Open",
+    workflowStatus: workflowLabel(email.workflowState),
     requiresDraft,
     draftId: draftStarted ? draft?.id || null : null,
-    draftStatus: draftStarted ? draft?.status || null : null,
+    draftStatus: draftStarted ? draftStatusLabel(email.workflowState) : null,
     draftStatusLabel: draftStarted ? buildDraftView(draft).statusLabel : "No draft",
     draftReadyForHumanSend: draftReady,
-    workflowLabel: isDone
-      ? "Completed"
-      : !requiresDraft
-        ? email.reviewed
-          ? "Ready to complete"
-          : "Review required"
-        : draftReady
-          ? "Draft approved"
-          : draft?.status === "Saved"
-            ? "Draft saved"
-            : draftStarted
-              ? "Draft in review"
-              : "Draft needed",
-    canComplete: isDone ? false : requiresDraft ? draftReady : Boolean(email.reviewed),
-    completeActionLabel: isDone ? "Completed" : "Done",
-    draftActionLabel: isDone ? "Draft locked" : draftStarted ? draftReady ? "View approved draft" : "Edit draft" : "Generate draft",
-    canGenerateDraft: !isDone && Boolean(email.reviewed) && !draftStarted,
+    workflowLabel: workflowLabel(email.workflowState),
+    canComplete: false,
+    completeActionLabel: "Completed",
+    draftActionLabel: isDone ? "View approved draft" : draftStarted ? "Edit draft" : "Generate draft",
+    canGenerateDraft: email.workflowState === WORKFLOW_STATE.READY_FOR_DRAFT && !draftStarted,
     canOpenDraft: draftStarted,
-    completionBlocker: !email.reviewed
+    completionBlocker: !isReviewed
       ? "Review this email before generating a draft."
-      : requiresDraft && !draftReady
-        ? "This workflow still needs a draft before it can be completed."
-        : ""
+      : isDone
+        ? "This workflow is complete."
+        : draftStarted
+          ? "Open the existing draft to continue this workflow."
+          : ""
   };
 }
 
 function getCompletionCheck(email) {
   const emailView = buildEmailView(email);
-  if (emailView.canComplete) {
-    return {
-      allowed: true,
-      type: "mark-done",
-      emailId: email.id,
-      title: "Complete workflow",
-      message: "Mark this workflow complete?",
-      primaryLabel: "Mark complete"
-    };
-  }
-
-  if (!emailView.requiresDraft) {
-    return {
-      allowed: false,
-      type: "review-email",
-      emailId: email.id,
-      title: "Review required",
-      message: "Review this email before completing the workflow.",
-      primaryLabel: "Review email"
-    };
-  }
-
   if (!emailView.draftId) {
     return {
       allowed: false,
@@ -262,7 +388,9 @@ function getCompletionCheck(email) {
     emailId: email.id,
     draftId: emailView.draftId,
     title: "Draft approval needed",
-    message: "This workflow needs a reviewed and approved draft before it can be completed.",
+    message: emailView.draftReadyForHumanSend
+      ? "This workflow is already complete."
+      : "This workflow needs a reviewed, saved, and approved draft before it can be completed.",
     primaryLabel: "Review draft"
   };
 }
@@ -290,10 +418,10 @@ function findEmployee(id) {
 }
 
 function buildDigest() {
-  const openEmails = state.emails.filter((email) => email.status !== "Done");
-  const activeDrafts = state.drafts.filter((draft) => draft.generated || draft.reviewed || draftReadyForCompletion(draft));
-  const readyDrafts = activeDrafts.filter((draft) => draftReadyForCompletion(draft)).length;
-  const waitingDrafts = activeDrafts.filter((draft) => !draftReadyForCompletion(draft)).length;
+  const openEmails = state.emails.filter((email) => !emailIsComplete(email));
+  const draftViews = state.drafts.map(buildDraftView);
+  const readyDrafts = draftViews.filter((draft) => draft.isReadyForHumanSend).length;
+  const waitingDrafts = draftViews.filter((draft) => draft.canSelectForBulkApproval).length;
   const byCategory = (category) => openEmails.filter((email) => email.category === category);
   const urgent = openEmails.filter((email) => email.urgency === "High");
 
@@ -402,8 +530,8 @@ function assistantMessageMatches(message, aliases) {
 
 function answerAssistantCommand(rawMessage, context = {}) {
   const message = normalizeAssistantMessage(rawMessage);
-  const urgentCount = state.emails.filter((email) => email.status !== "Done" && email.urgency === "High").length;
-  const invoiceCount = state.emails.filter((email) => email.status !== "Done" && email.category === "Accounting").length;
+  const urgentCount = state.emails.filter((email) => !emailIsComplete(email) && email.urgency === "High").length;
+  const invoiceCount = state.emails.filter((email) => !emailIsComplete(email) && email.category === "Accounting").length;
   const waitingDrafts = state.drafts
     .map(buildDraftView)
     .filter((draft) => draft.canSelectForBulkApproval)
@@ -415,6 +543,13 @@ function answerAssistantCommand(rawMessage, context = {}) {
     return {
       text: `${urgentCount} urgent emails are open. I switched Triage to urgent items.`,
       action: { type: "show_triage", filter: "urgent" }
+    };
+  }
+
+  if (assistantMessageMatches(message, ["triage", "inbox", "show inbox", "open inbox"])) {
+    return {
+      text: "I opened the full Triage inbox.",
+      action: { type: "show_triage", filter: "all" }
     };
   }
 
@@ -435,7 +570,7 @@ function answerAssistantCommand(rawMessage, context = {}) {
 
   if (assistantMessageMatches(message, ["draft", "drafts", "approval", "approve"])) {
     return {
-      text: `${waitingDrafts} drafts need human review or approval. I opened the Drafts queue.`,
+      text: `${waitingDrafts} saved drafts need human approval. I opened the Drafts queue.`,
       action: { type: "show_drafts", filter: "needs_approval" }
     };
   }
@@ -494,22 +629,17 @@ export async function generateMorningDigest() {
 
 export async function listDrafts() {
   await delay(400);
-  return clone(
-    state.drafts
-      .filter((draft) => draft.generated || draft.reviewed || draftReadyForCompletion(draft))
-      .map(buildDraftView)
-  );
+  return clone(state.drafts.map(buildDraftView));
 }
 
 export async function getDraftDetail(id) {
   await delay(450);
   const draft = findDraft(id);
   const email = findEmail(draft.emailId || draft.id);
-  if (!draft.generated) {
-    throw new Error("Generate this draft before reviewing it.");
-  }
-  if (draft.generated && !draft.reviewed) {
-    draft.reviewed = true;
+  if (email.workflowState === WORKFLOW_STATE.DRAFT_GENERATED) {
+    email.workflowState = WORKFLOW_STATE.DRAFT_REVIEWED;
+    draft.reviewedAt = new Date().toISOString();
+    draft.updatedAt = draft.reviewedAt;
     persistState();
   }
   return clone({
@@ -523,8 +653,8 @@ export async function getDraftDetail(id) {
       suggestedAction: email.suggestedAction,
       confidence: email.confidence,
       urgency: email.urgency,
-      status: email.status,
-      workflowStatus: email.workflowStatus
+      status: emailIsComplete(email) ? "Done" : "Open",
+      workflowStatus: workflowLabel(email.workflowState)
     }
   });
 }
@@ -564,8 +694,8 @@ export async function resetDemoData() {
 export async function getEmailThread(id) {
   await delay();
   const email = findEmail(id);
-  if (!email.reviewed) {
-    email.reviewed = true;
+  if (email.workflowState === WORKFLOW_STATE.NEEDS_REVIEW) {
+    email.workflowState = WORKFLOW_STATE.READY_FOR_DRAFT;
     email.reviewedAt = new Date().toISOString();
     persistState();
   }
@@ -585,36 +715,38 @@ export async function summarizeThread(id) {
 export async function generateDraftReply(id) {
   await delay(750);
   const email = findEmail(id);
-  if (email.status === "Done") {
+  if (emailIsComplete(email)) {
     throw new Error("This email is done. Reopen it before creating or changing a draft.");
   }
-  if (!email.reviewed) {
+  if (email.workflowState === WORKFLOW_STATE.NEEDS_REVIEW) {
     throw new Error("Review this email before generating a draft.");
   }
 
-  let draft = findDraftByEmailId(id);
-  if (!draft) {
-    draft = {
-      id,
-      emailId: id,
-      title: email.suggestedAction,
-      source: email.subject,
-      text: email.draft,
-      confidence: email.confidence,
-      risk: email.urgency === "High" ? "High" : "Low",
-      generated: true,
-      reviewed: false,
-      status: "Generated"
-    };
-    state.drafts.push(draft);
-  } else if (draft.status === "Needs approval" && draft.text === email.draft) {
-    draft.generated = true;
-    draft.status = "Generated";
+  const existingDraft = findDraftByEmailId(id);
+  if (existingDraft) {
+    return clone(buildDraftView(existingDraft));
   }
 
-  email.workflowStatus = draft.status === "Ready for human send" ? "Draft approved" : "Draft in review";
+  if (email.workflowState !== WORKFLOW_STATE.READY_FOR_DRAFT) {
+    throw new Error("This workflow is not ready to generate a new draft.");
+  }
+
+  const now = new Date().toISOString();
+  const draft = {
+    id: `draft-${id}`,
+    emailId: id,
+    title: email.suggestedAction,
+    source: email.subject,
+    text: email.draft,
+    confidence: email.confidence,
+    risk: email.urgency === "High" ? "High" : "Low",
+    createdAt: now,
+    updatedAt: now
+  };
+  state.drafts.push(draft);
+  email.workflowState = WORKFLOW_STATE.DRAFT_GENERATED;
   persistState();
-  return clone(draft);
+  return clone(buildDraftView(draft));
 }
 
 export async function saveDraft(id, draftText) {
@@ -625,28 +757,25 @@ export async function saveDraft(id, draftText) {
 
   const draft = findDraft(id);
   const email = findEmail(draft.emailId || draft.id);
-  if (email.status === "Done") {
+  if (emailIsComplete(email)) {
     throw new Error("This email is done. Reopen it before editing the draft.");
   }
-  if (!draft.generated) {
-    throw new Error("Generate this draft before saving it.");
-  }
-  if (!draft.reviewed) {
+  if (![WORKFLOW_STATE.DRAFT_REVIEWED, WORKFLOW_STATE.DRAFT_SAVED].includes(email.workflowState)) {
     throw new Error("Review this draft before saving it.");
   }
 
   draft.text = draftText;
-  draft.status = "Saved";
-  email.workflowStatus = "Draft saved";
+  draft.updatedAt = new Date().toISOString();
+  email.workflowState = WORKFLOW_STATE.DRAFT_SAVED;
   persistState();
-  return clone(draft);
+  return clone(buildDraftView(draft));
 }
 
 export async function approveDraft(id) {
   await delay();
   const draft = findDraft(id);
   const email = findEmail(draft.emailId || draft.id);
-  if (email.status === "Done") {
+  if (emailIsComplete(email)) {
     throw new Error("This email is done. Reopen it before changing draft approval.");
   }
   if (!draftReadyForApproval(draft)) {
@@ -667,7 +796,7 @@ export async function approveDrafts(ids) {
       const email = findEmail(draft.emailId || draft.id);
       return { draft, email };
     })
-    .filter(({ email }) => email.status !== "Done");
+    .filter(({ email }) => !emailIsComplete(email));
 
   if (!candidates.length) {
     throw new Error("No selected drafts could be approved.");
@@ -696,7 +825,7 @@ export async function approveLowRiskDrafts() {
   const lowRiskIds = state.drafts
     .filter((draft) => draft.risk !== "High")
     .filter(draftReadyForApproval)
-    .filter((draft) => findEmail(draft.emailId || draft.id).status !== "Done")
+    .filter((draft) => !emailIsComplete(findEmail(draft.emailId || draft.id)))
     .map((draft) => draft.id);
 
   if (!lowRiskIds.length) {
@@ -746,21 +875,10 @@ export async function deleteRule(id) {
 export async function markEmailDone(id) {
   await delay();
   const email = findEmail(id);
-  const draft = findDraftByEmailId(id);
-  if (!actionRequiresDraft(email) && !email.reviewed) {
-    throw new Error("Review this email before completing the workflow.");
+  if (!emailIsComplete(email)) {
+    throw new Error("Approve the reviewed and saved draft to complete this workflow.");
   }
-  if (actionRequiresDraft(email) && !draftReadyForCompletion(draft || {})) {
-    throw new Error("This workflow still needs a draft before it can be completed.");
-  }
-  email.status = "Done";
-  email.workflowStatus = "Completed";
-  recordActivity("email-done", {
-    emailId: id,
-    label: `Workflow completed: ${email.subject}`
-  });
-  persistState();
-  return clone(email);
+  return clone(buildEmailView(email));
 }
 
 export async function updateEmailCategory(id, category) {

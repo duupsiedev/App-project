@@ -14,14 +14,12 @@ import {
   getDraftForEmail,
   getSettings,
   getEmailThread,
-  getWorkflowCompletionCheck,
   listActivity,
   listAssistantMessages,
   listEmployees,
   listDrafts,
   listEmails,
   listRules,
-  markEmailDone,
   resetDemoData,
   saveSettings,
   saveDraft,
@@ -258,7 +256,7 @@ function renderDashboard() {
       </div>
       <div class="panel metric">
         <div class="label">Drafts awaiting approval</div>
-        <div class="value">${state.drafts.filter((draft) => !isDraftReady(draft)).length || 0}</div>
+        <div class="value">${state.drafts.filter((draft) => draft.canSelectForBulkApproval).length || 0}</div>
         <div class="caption">No messages are sent automatically</div>
       </div>
       <div class="panel metric">
@@ -348,9 +346,7 @@ function renderTriage() {
                 <button class="btn subtle" data-review-email="${email.id}" ${isBusy(`review-${email.id}`) ? "disabled" : ""}>${isBusy(`review-${email.id}`) ? "Opening..." : "Review"}</button>
                 ${email.status === "Done"
                   ? `<span class="status-text">Complete</span>`
-                  : email.requiresDraft
-                    ? `<span class="status-text" title="Generate, review, and approve a draft to complete this workflow.">Draft required</span>`
-                    : `<span class="status-text" title="Open the email and review its details before completing the workflow.">Review before completing</span>`}
+                  : `<span class="status-text" title="Generate, review, save, and approve a draft to complete this workflow.">Draft required</span>`}
               </td>
             </tr>
           `).join("")}
@@ -468,9 +464,7 @@ function renderDrawer() {
         ${email.canOpenDraft ? `<button class="btn subtle" data-open-email-draft="${email.id}" ${isBusy(`open-email-draft-${email.id}`) ? "disabled" : ""}>${email.draftActionLabel}</button>` : `<button class="btn subtle" data-generate-draft="${email.id}" ${!email.canGenerateDraft || isBusy(`draft-${email.id}`) ? `disabled title="${email.completionBlocker || "Draft action is unavailable."}"` : ""}>${isBusy(`draft-${email.id}`) ? "Drafting..." : email.draftActionLabel}</button>`}
         ${emailDone
           ? `<span class="status-text">Workflow complete</span>`
-          : email.requiresDraft
-            ? `<span class="status-text">Approving the draft completes this workflow.</span>`
-            : `<button class="btn success" data-done-email="${email.id}" ${isBusy(`done-${email.id}`) ? "disabled" : ""}>${isBusy(`done-${email.id}`) ? "Saving..." : "Mark complete"}</button>`}
+          : `<span class="status-text">Approving the draft completes this workflow.</span>`}
       </div>
       <p class="drawer-note">This is a local prototype. Courio does not send email.</p>
     </aside>
@@ -498,25 +492,12 @@ function renderConfirmModal() {
   `;
 }
 
-async function requestDone(emailId) {
-  state.confirmDialog = await getWorkflowCompletionCheck(emailId);
-  render();
-}
-
 async function openGeneratedDraft(emailId) {
   const draft = await generateDraftReply(emailId);
   state.drafts = await listDrafts();
   await refreshEmails(emailId);
   state.selectedDraft = await getDraftDetail(draft.id);
   state.selectedEmail = null;
-}
-
-async function completeEmailWorkflow(emailId) {
-  await markEmailDone(emailId);
-  await refreshEmails(emailId);
-  state.drafts = await listDrafts();
-  state.activity = await listActivity();
-  state.digest = await generateMorningDigest();
 }
 
 async function approveDraftWorkflow(draftId) {
@@ -789,7 +770,7 @@ function renderAssistant() {
           </div>
           <div class="assistant-messages">
             ${messages.map((message) => `
-              <div class="assistant-message ${message.role}">
+              <div class="assistant-message ${message.role === "user" ? "user" : "bot"}">
                 ${escapeHtml(message.text)}
               </div>
             `).join("")}
@@ -798,7 +779,7 @@ function renderAssistant() {
             <input data-assistant-input placeholder="Show urgent emails" autocomplete="off" ${isBusy("assistant") ? "disabled" : ""}>
             <button class="btn primary" type="submit" ${isBusy("assistant") ? "disabled" : ""}>${isBusy("assistant") ? "Working..." : "Send"}</button>
           </form>
-          <p class="assistant-hint">Try: urgent emails, drafts, invoices, digest, invoice rule, or reset.</p>
+          <p class="assistant-hint">Try: triage, urgent emails, drafts, invoices, digest, invoice rule, or reset.</p>
         </div>
       ` : ""}
       <button class="assistant-fab" data-assistant-toggle aria-label="Open Courio assistant">
@@ -966,43 +947,6 @@ document.addEventListener("click", async (event) => {
     const dialog = state.confirmDialog;
     state.confirmDialog = null;
 
-    if (dialog?.type === "generate-draft") {
-      await runAction(`draft-${dialog.emailId}`, async () => {
-        await openGeneratedDraft(dialog.emailId);
-      }, "Draft opened. Existing edits were preserved.");
-      return;
-    }
-
-    if (dialog?.type === "review-draft") {
-      await runAction(`review-draft-${dialog.draftId}`, async () => {
-        state.selectedDraft = await getDraftDetail(dialog.draftId);
-        state.selectedEmail = null;
-        state.summary = "";
-        state.showExplanation = false;
-      }, "Draft opened for review.");
-      return;
-    }
-
-    if (dialog?.type === "review-email") {
-      await runAction(`review-${dialog.emailId}`, async () => {
-        state.selectedEmail = await getEmailThread(dialog.emailId);
-        state.emails = await listEmails();
-        state.selectedDraft = null;
-        state.selectedRule = null;
-        state.selectedEmployee = null;
-        state.summary = "";
-        state.showExplanation = false;
-      }, "Email opened for review.");
-      return;
-    }
-
-    if (dialog?.type === "mark-done") {
-      await runAction(`done-${dialog.emailId}`, async () => {
-        await completeEmailWorkflow(dialog.emailId);
-      }, "Email marked done.");
-      return;
-    }
-
     if (dialog?.type === "reset-demo") {
       await runAction("reset-demo", async () => {
         await resetDemoData();
@@ -1134,13 +1078,6 @@ document.addEventListener("click", async (event) => {
         state.selectedDraft = await getDraftDetail(id);
       }
     }, "Draft saved locally.");
-  }
-
-  if (target.dataset.doneEmail) {
-    const id = target.dataset.doneEmail;
-    await runAction(`check-done-${id}`, async () => {
-      await requestDone(id);
-    });
   }
 
   if (target.dataset.toggleRule) {
