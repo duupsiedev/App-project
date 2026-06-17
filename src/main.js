@@ -668,7 +668,7 @@ function renderEmployeeDrawer(root) {
       <div class="drawer-section">
         <label>Name<input data-employee-field="name" value="${escapeHtml(employee.name || "")}"></label>
         <label>Email<input data-employee-field="email" type="email" value="${escapeHtml(employee.email || "")}"></label>
-        <label>Title<input data-employee-field="title" value="${escapeHtml(employee.title || "")}"></label>
+        <label>Role / title<input data-employee-field="title" value="${escapeHtml(employee.title || "")}"></label>
         <label>Department<input data-employee-field="department" value="${escapeHtml(employee.department || "")}"></label>
       </div>
 
@@ -677,7 +677,7 @@ function renderEmployeeDrawer(root) {
         ${isNew ? "" : `<button class="btn danger" data-delete-employee="${employee.id}">Remove employee</button>`}
         <button class="btn subtle" data-close-drawer>Close</button>
       </div>
-      <p class="drawer-note">Employee records remain fake and local to this browser.</p>
+      <p class="drawer-note">Employee records remain fake and local to this browser. Email addresses must be valid and unique.</p>
     </aside>
   `;
 }
@@ -1199,11 +1199,12 @@ document.addEventListener("click", async (event) => {
   if (target.dataset.deleteEmployee) {
     const id = target.dataset.deleteEmployee;
     const employee = state.employees.find((item) => item.id === id);
+    const assignedCount = state.emails.filter((email) => email.assignedTo === id).length;
     state.confirmDialog = {
       type: "delete-employee",
       employeeId: id,
       title: "Remove this employee?",
-      message: `Remove ${employee?.name || "this employee"}? Their assigned emails will return to Unassigned.`,
+      message: `Remove ${employee?.name || "this employee"}? ${assignedCount} assigned email${assignedCount === 1 ? "" : "s"} will return to Unassigned.`,
       primaryLabel: "Remove employee",
       tone: "danger"
     };

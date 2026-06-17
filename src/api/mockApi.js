@@ -417,6 +417,33 @@ function findEmployee(id) {
   return employee;
 }
 
+function normalizeEmployeeInput(employee, existingId = null) {
+  const normalized = {
+    name: employee.name?.trim() || "",
+    email: employee.email?.trim().toLowerCase() || "",
+    title: employee.title?.trim() || "",
+    department: employee.department?.trim() || ""
+  };
+
+  if (!normalized.name) throw new Error("Employee name is required.");
+  if (!normalized.email) throw new Error("Employee email is required.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized.email)) {
+    throw new Error("Enter a valid employee email address.");
+  }
+  if (!normalized.title) throw new Error("Employee title is required.");
+  if (!normalized.department) throw new Error("Employee department is required.");
+
+  const duplicate = state.employees.find((item) => (
+    item.id !== existingId
+    && item.email?.trim().toLowerCase() === normalized.email
+  ));
+  if (duplicate) {
+    throw new Error("An employee with this email already exists.");
+  }
+
+  return normalized;
+}
+
 function buildDigest() {
   const openEmails = state.emails.filter((email) => !emailIsComplete(email));
   const draftViews = state.drafts.map(buildDraftView);
@@ -901,17 +928,11 @@ export async function assignEmail(id, employeeId) {
 
 export async function createEmployee(employee) {
   await delay(500);
-  if (!employee.name?.trim()) throw new Error("Employee name is required.");
-  if (!employee.email?.trim()) throw new Error("Employee email is required.");
-  if (!employee.title?.trim()) throw new Error("Employee title is required.");
-  if (!employee.department?.trim()) throw new Error("Employee department is required.");
+  const normalized = normalizeEmployeeInput(employee);
 
   const created = {
     id: `employee-${Date.now()}`,
-    name: employee.name.trim(),
-    email: employee.email.trim(),
-    title: employee.title.trim(),
-    department: employee.department.trim()
+    ...normalized
   };
   state.employees.push(created);
   recordActivity("employee-added", {
@@ -925,16 +946,12 @@ export async function createEmployee(employee) {
 export async function updateEmployee(id, updates) {
   await delay(500);
   const employee = findEmployee(id);
-  if (!updates.name?.trim()) throw new Error("Employee name is required.");
-  if (!updates.email?.trim()) throw new Error("Employee email is required.");
-  if (!updates.title?.trim()) throw new Error("Employee title is required.");
-  if (!updates.department?.trim()) throw new Error("Employee department is required.");
+  const normalized = normalizeEmployeeInput(updates, id);
 
-  Object.assign(employee, {
-    name: updates.name.trim(),
-    email: updates.email.trim(),
-    title: updates.title.trim(),
-    department: updates.department.trim()
+  Object.assign(employee, normalized);
+  recordActivity("employee-updated", {
+    employeeId: employee.id,
+    label: `Employee updated: ${employee.name}`
   });
   persistState();
   return clone(employee);
@@ -946,12 +963,16 @@ export async function deleteEmployee(id) {
   if (index === -1) throw new Error("Employee not found.");
   const [deleted] = state.employees.splice(index, 1);
   state.deletedEmployeeIds = [...new Set([...(state.deletedEmployeeIds || []), id])];
+  let reassignedCount = 0;
   state.emails.forEach((email) => {
-    if (email.assignedTo === id) email.assignedTo = "";
+    if (email.assignedTo === id) {
+      email.assignedTo = "";
+      reassignedCount += 1;
+    }
   });
   recordActivity("employee-deleted", {
     employeeId: deleted.id,
-    label: `Employee removed: ${deleted.name}`
+    label: `Employee removed: ${deleted.name}. ${reassignedCount} assigned emails returned to Unassigned.`
   });
   persistState();
   return clone(deleted);
