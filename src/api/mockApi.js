@@ -17,6 +17,101 @@ const WORKFLOW_STATE = Object.freeze({
 
 const WORKFLOW_STATES = new Set(Object.values(WORKFLOW_STATE));
 
+const setupImportPreview = {
+  status: "Simulated setup preview",
+  safetyNote: "No account is connected. This demo does not access real email, folders, files, or contacts.",
+  futureNote: "In a future version, this step could connect to Gmail or Microsoft 365 after explicit approval.",
+  mailboxes: [
+    {
+      id: "mailbox-main",
+      name: "Main inbox",
+      address: "hello@demo-company.ca",
+      type: "Primary mailbox",
+      volume: "142 recent threads",
+      risk: "Mixed priority",
+      folders: ["Inbox", "Needs reply", "Clients", "Vendors", "Archive"],
+      categories: ["Client complaint", "Accounting", "Sales", "Scheduling"],
+      frequentSenders: ["Northstar Retail", "Brightline Supplies", "Lakeside Catering"],
+      sharedInboxes: ["info@demo-company.ca"],
+      recentThreads: ["Very unhappy about no response", "Invoice #1844 payment status", "Quote request for monthly bookkeeping"]
+    },
+    {
+      id: "mailbox-accounting",
+      name: "Accounting",
+      address: "accounting@demo-company.ca",
+      type: "Shared mailbox",
+      volume: "88 recent threads",
+      risk: "Document-heavy",
+      folders: ["Invoices", "Receipts", "Payroll", "Tax documents", "Vendors"],
+      categories: ["Accounting", "Documents", "Missing documents"],
+      frequentSenders: ["Brightline Supplies", "Harbour Grill", "Maple Therapy"],
+      sharedInboxes: ["payroll@demo-company.ca"],
+      recentThreads: ["Invoice #1844 payment status", "Payroll documents attached", "Missing March receipts"]
+    },
+    {
+      id: "mailbox-sales",
+      name: "Sales",
+      address: "sales@demo-company.ca",
+      type: "Shared mailbox",
+      volume: "53 recent threads",
+      risk: "Revenue-sensitive",
+      folders: ["Leads", "Quotes", "Follow up", "Won", "Lost"],
+      categories: ["Sales", "Scheduling"],
+      frequentSenders: ["Lakeside Catering", "Greenway Landscaping", "New prospects"],
+      sharedInboxes: ["quotes@demo-company.ca"],
+      recentThreads: ["Quote request for monthly bookkeeping", "Can we move tomorrow's appointment?"]
+    },
+    {
+      id: "mailbox-operations",
+      name: "Operations",
+      address: "ops@demo-company.ca",
+      type: "Team mailbox",
+      volume: "61 recent threads",
+      risk: "Coordination-heavy",
+      folders: ["Scheduling", "Client updates", "Internal", "Completed"],
+      categories: ["Scheduling", "Documents", "General"],
+      frequentSenders: ["Greenway Landscaping", "Client coordinators", "Office team"],
+      sharedInboxes: ["support@demo-company.ca"],
+      recentThreads: ["Can we move tomorrow's appointment?", "Payroll documents attached"]
+    },
+    {
+      id: "mailbox-shared",
+      name: "Shared inbox",
+      address: "info@demo-company.ca",
+      type: "Shared intake",
+      volume: "119 recent threads",
+      risk: "Needs routing",
+      folders: ["Inbox", "Unsorted", "Clients", "Prospects", "Vendors"],
+      categories: ["Client complaint", "Sales", "Accounting", "Missing documents"],
+      frequentSenders: ["Clients", "Suppliers", "Prospects"],
+      sharedInboxes: ["hello@demo-company.ca", "support@demo-company.ca"],
+      recentThreads: ["Very unhappy about no response", "Quote request for monthly bookkeeping", "Missing March receipts"]
+    }
+  ],
+  scanItems: [
+    { label: "Folders", detail: "Inbox structure, archive folders, and team-specific folders.", count: 14 },
+    { label: "Labels/categories", detail: "Existing categories that could map to Courio triage buckets.", count: 9 },
+    { label: "Frequent senders", detail: "Recurring clients, vendors, prospects, and internal senders.", count: 26 },
+    { label: "Shared inboxes", detail: "Mailboxes that several employees may monitor.", count: 4 },
+    { label: "Recent threads", detail: "Recent local demo examples used to preview workflow suggestions.", count: 142 },
+    { label: "Suggested workflow rules", detail: "Draft local rules for routing, escalation, and follow-up.", count: 5 }
+  ],
+  setupSteps: [
+    { title: "Choose mailbox", detail: "Select the mailbox Courio should preview.", state: "Available in demo" },
+    { title: "Scan folders and labels", detail: "Preview folders, categories, and common sender patterns.", state: "Simulated" },
+    { title: "Detect common email types", detail: "Identify invoices, quote requests, complaints, missing documents, and scheduling.", state: "Simulated" },
+    { title: "Suggest workflows", detail: "Create local suggested rules for review before anything is used.", state: "Simulated" },
+    { title: "Ready for review", detail: "Move to Triage and Rules to inspect the fake suggestions.", state: "Demo only" }
+  ],
+  workflowSuggestions: [
+    { match: "Invoices", outcome: "Accounting review", reason: "Invoice numbers, due dates, supplier language." },
+    { match: "Quote requests", outcome: "Sales intake", reason: "Pricing requests, service-fit details, new prospect wording." },
+    { match: "Complaints", outcome: "Owner escalation", reason: "Repeated follow-ups, negative sentiment, senior attention requests." },
+    { match: "Missing documents", outcome: "Follow-up draft", reason: "Receipts, attachments, payroll, or document gaps." },
+    { match: "Scheduling", outcome: "Offer available times", reason: "Appointment changes, time windows, reschedule language." }
+  ]
+};
+
 const defaultState = {
   schemaVersion: STATE_SCHEMA_VERSION,
   emails: mockEmails.map(createDefaultEmail),
@@ -647,6 +742,11 @@ export async function listEmployees() {
 export async function listRules() {
   await delay(400);
   return clone(state.rules);
+}
+
+export async function getSetupImportPreview() {
+  await delay(350);
+  return clone(setupImportPreview);
 }
 
 export async function generateMorningDigest() {

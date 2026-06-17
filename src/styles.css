@@ -330,6 +330,34 @@ h1 {
   gap: 12px;
 }
 
+.setup-mailbox-list {
+  display: grid;
+  gap: 8px;
+}
+
+.setup-mailbox {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 12px;
+  text-align: left;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.setup-mailbox.active {
+  background: var(--blue2);
+  border-color: #c7d7fe;
+}
+
+.setup-mailbox span,
+.setup-mailbox small {
+  color: var(--muted);
+}
+
 .step {
   display: grid;
   grid-template-columns: 34px 1fr auto;

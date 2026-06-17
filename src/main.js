@@ -14,6 +14,7 @@ import {
   getDraftForEmail,
   getSettings,
   getEmailThread,
+  getSetupImportPreview,
   listActivity,
   listAssistantMessages,
   listEmployees,
@@ -68,6 +69,8 @@ const state = {
   assistantOpen: false,
   assistantMessages: [],
   activity: [],
+  setupPreview: null,
+  selectedSetupMailboxId: "",
   summary: "",
   showExplanation: false
 };
@@ -225,7 +228,7 @@ function isAdvancedSettingsForm() {
 
 async function loadInitialData() {
   try {
-    const [emails, employees, rules, drafts, settings, digest, assistantMessages, activity] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity()]);
+    const [emails, employees, rules, drafts, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
     state.emails = emails;
     state.employees = employees;
     state.rules = rules;
@@ -235,6 +238,8 @@ async function loadInitialData() {
     state.digest = digest;
     state.assistantMessages = assistantMessages;
     state.activity = activity;
+    state.setupPreview = setupPreview;
+    state.selectedSetupMailboxId = setupPreview.mailboxes[0]?.id || "";
   } catch (error) {
     toast(error.message || "Could not load mock data.", true);
   } finally {
@@ -317,26 +322,90 @@ function renderDashboard() {
 }
 
 function renderImport() {
-  const steps = [
-    ["Preview Microsoft 365 connection", "Shows how an admin could later choose Outlook mailboxes, folders, categories, and contacts. No account is connected now."],
-    ["Preview mailbox import", "Demonstrates the mailbox structure and workflow patterns Courio could import after a real integration is approved."],
-    ["Preview workflow suggestions", "Generates local suggestions from fake demo messages. No mailbox rules are created."],
-    ["Preview observation mode", "Shows how suggested actions could be reviewed before any future mailbox integration is enabled."]
-  ];
+  const setup = state.setupPreview;
+  if (!setup) {
+    document.querySelector("#import").innerHTML = `<div class="loading">Loading simulated setup preview...</div>`;
+    return;
+  }
+
+  const selectedMailbox = setup.mailboxes.find((mailbox) => mailbox.id === state.selectedSetupMailboxId) || setup.mailboxes[0];
 
   document.querySelector("#import").innerHTML = `
-    <div class="panel">
-      <div class="panel-title"><h2>Microsoft 365 setup preview</h2><span>Simulated locally</span></div>
-      <div class="workflow">
-        ${steps.map((step, index) => `
-          <div class="step">
-            <div class="step-num">${index + 1}</div>
-            <div><strong>${escapeHtml(step[0])}</strong><p>${escapeHtml(step[1])}</p></div>
-            <button class="btn subtle" disabled title="Real Microsoft 365 setup is intentionally unavailable in this fake/local prototype.">
-              Demo only
+    <div class="grid cols-2">
+      <div class="panel">
+        <div class="panel-title"><h2>${escapeHtml(setup.status)}</h2><span>No account connected</span></div>
+        <div class="preview">${escapeHtml(setup.safetyNote)}</div>
+        <div class="preview" style="margin-top:12px">${escapeHtml(setup.futureNote)}</div>
+        <div class="actions" style="margin-top:14px">
+          <button class="btn primary" disabled title="Real OAuth/provider connection is intentionally unavailable in this fake/local prototype.">Connect demo only</button>
+          <button class="btn subtle" data-tab-target="triage">Review local triage</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title"><h2>Choose simulated mailbox</h2><span>${setup.mailboxes.length} demo options</span></div>
+        <div class="setup-mailbox-list">
+          ${setup.mailboxes.map((mailbox) => `
+            <button class="setup-mailbox ${mailbox.id === selectedMailbox.id ? "active" : ""}" data-setup-mailbox="${mailbox.id}">
+              <strong>${escapeHtml(mailbox.name)}</strong>
+              <span>${escapeHtml(mailbox.address)}</span>
+              <small>${escapeHtml(mailbox.type)} - ${escapeHtml(mailbox.volume)}</small>
             </button>
-          </div>
-        `).join("")}
+          `).join("")}
+        </div>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:16px">
+      <div class="panel">
+        <div class="panel-title"><h2>${escapeHtml(selectedMailbox.name)} preview</h2><span>${escapeHtml(selectedMailbox.risk)}</span></div>
+        <table class="table">
+          <tr><td>Folders</td><td>${escapeList(selectedMailbox.folders)}</td></tr>
+          <tr><td>Labels/categories</td><td>${escapeList(selectedMailbox.categories)}</td></tr>
+          <tr><td>Frequent senders</td><td>${escapeList(selectedMailbox.frequentSenders)}</td></tr>
+          <tr><td>Shared inboxes</td><td>${escapeList(selectedMailbox.sharedInboxes)}</td></tr>
+          <tr><td>Recent threads</td><td>${escapeList(selectedMailbox.recentThreads)}</td></tr>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title"><h2>What Courio would scan</h2><span>Simulated only</span></div>
+        <table class="table">
+          ${setup.scanItems.map((item) => `
+            <tr>
+              <td><span class="badge lead">${item.count}</span><br>${escapeHtml(item.label)}</td>
+              <td>${escapeHtml(item.detail)}</td>
+            </tr>
+          `).join("")}
+        </table>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:16px">
+      <div class="panel">
+        <div class="panel-title"><h2>Simulated setup flow</h2><span>Fake progress</span></div>
+        <div class="workflow">
+          ${setup.setupSteps.map((step, index) => `
+            <div class="step">
+              <div class="step-num">${index + 1}</div>
+              <div><strong>${escapeHtml(step.title)}</strong><p>${escapeHtml(step.detail)}</p></div>
+              <span class="badge ${index === 0 ? "lead" : "done"}">${escapeHtml(step.state)}</span>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title"><h2>Suggested workflow preview</h2><span>Needs human review</span></div>
+        <table class="table">
+          ${setup.workflowSuggestions.map((suggestion) => `
+            <tr>
+              <td><strong>${escapeHtml(suggestion.match)}</strong><br><small>${escapeHtml(suggestion.reason)}</small></td>
+              <td><span class="badge invoice">${escapeHtml(suggestion.outcome)}</span></td>
+            </tr>
+          `).join("")}
+        </table>
+        <div class="preview" style="margin-top:14px">These are local examples. Courio does not create mailbox rules or send email from this page.</div>
       </div>
     </div>
   `;
@@ -1011,6 +1080,11 @@ document.addEventListener("click", async (event) => {
 
   if (target.dataset.tabTarget) {
     navigateTo(target.dataset.tabTarget);
+  }
+
+  if (target.dataset.setupMailbox) {
+    state.selectedSetupMailboxId = target.dataset.setupMailbox;
+    renderImport();
   }
 
   if (target.dataset.triageFilter) {
