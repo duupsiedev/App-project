@@ -856,11 +856,28 @@ textarea {
   border-top: 1px solid var(--border);
 }
 
-.assistant-hint {
-  margin: -4px 12px 12px;
+.assistant-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 12px;
+}
+
+.assistant-chip {
+  border: 1px solid var(--border);
+  background: var(--surface2);
   color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 9px;
+  cursor: pointer;
   font-size: .75rem;
-  line-height: 1.35;
+  font-weight: 650;
+}
+
+.assistant-chip:hover {
+  border-color: #c7d7fe;
+  color: var(--blue);
+  background: var(--blue2);
 }
 
 .assistant-fab {

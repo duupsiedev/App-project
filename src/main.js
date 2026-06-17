@@ -34,6 +34,15 @@ import {
 
 const app = document.querySelector("#app");
 const VALID_TABS = new Set(["dashboard", "import", "triage", "rules", "drafts", "admin"]);
+const ASSISTANT_SUGGESTIONS = [
+  "Triage",
+  "Urgent emails",
+  "Drafts needing approval",
+  "Invoices",
+  "Generate digest",
+  "Create invoice rule",
+  "Reset demo data"
+];
 
 const state = {
   tab: "dashboard",
@@ -875,7 +884,13 @@ function renderAssistant() {
             <input data-assistant-input placeholder="Show urgent emails" autocomplete="off" ${isBusy("assistant") ? "disabled" : ""}>
             <button class="btn primary" type="submit" ${isBusy("assistant") ? "disabled" : ""}>${isBusy("assistant") ? "Working..." : "Send"}</button>
           </form>
-          <p class="assistant-hint">Try: triage, urgent emails, drafts, invoices, digest, invoice rule, or reset.</p>
+          <div class="assistant-suggestions" aria-label="Assistant command suggestions">
+            ${ASSISTANT_SUGGESTIONS.map((suggestion) => `
+              <button class="assistant-chip" data-assistant-command="${escapeHtml(suggestion)}" ${isBusy("assistant") ? "disabled" : ""}>
+                ${escapeHtml(suggestion)}
+              </button>
+            `).join("")}
+          </div>
         </div>
       ` : ""}
       <button class="assistant-fab" data-assistant-toggle aria-label="Open Courio assistant">
@@ -883,6 +898,16 @@ function renderAssistant() {
       </button>
     </div>
   `;
+}
+
+async function submitAssistantCommand(message) {
+  await runAction("assistant", async () => {
+    const result = await sendAssistantCommand(message, {
+      selectedEmailId: state.selectedEmail?.id || null
+    });
+    state.assistantMessages = result.messages;
+    await applyAssistantAction(result.action);
+  });
 }
 
 async function applyAssistantAction(action) {
@@ -1031,6 +1056,11 @@ document.addEventListener("click", async (event) => {
   if (target.dataset.assistantToggle !== undefined) {
     state.assistantOpen = !state.assistantOpen;
     render();
+    return;
+  }
+
+  if (target.dataset.assistantCommand) {
+    await submitAssistantCommand(target.dataset.assistantCommand);
     return;
   }
 
@@ -1406,14 +1436,8 @@ document.addEventListener("submit", async (event) => {
   const message = input.value.trim();
   if (!message) return;
 
-  await runAction("assistant", async () => {
-    const result = await sendAssistantCommand(message, {
-      selectedEmailId: state.selectedEmail?.id || null
-    });
-    state.assistantMessages = result.messages;
-    input.value = "";
-    await applyAssistantAction(result.action);
-  });
+  input.value = "";
+  await submitAssistantCommand(message);
 });
 
 render();
