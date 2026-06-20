@@ -1,5 +1,5 @@
 import "./styles.css";
-import { copy } from "./data/mockCopy.js";
+import { createTranslator, getPageCopy, normalizeLanguage } from "./i18n/translations.js";
 import { renderAssistantView } from "./ui/assistantView.js";
 import { escapeHtml, escapeList } from "./ui/helpers.js";
 import {
@@ -50,6 +50,7 @@ const state = {
   drafts: [],
   settings: {
     companyName: "Demo PME Inc.",
+    language: "en",
     mode: "Simple",
     defaultMode: "Observation only",
     escalationRecipient: "owner@company.ca",
@@ -88,29 +89,29 @@ app.innerHTML = `
     <aside>
       <div class="brand">
         <div class="brand-title">Courio</div>
-        <div class="brand-sub">Assistant courriel pour PME</div>
+        <div class="brand-sub" data-copy="brand.subtitle">Email assistant for small businesses</div>
       </div>
       <nav class="nav">
         <div class="nav-group">
-          <div class="nav-label">Home</div>
-          <button class="active" data-tab="dashboard">Overview <small>Today</small></button>
+          <div class="nav-label" data-copy="nav.groups.home">Home</div>
+          <button class="active" data-tab="dashboard"><span data-copy="nav.dashboard">Overview</span> <small data-copy="nav.dashboardSmall">Today</small></button>
         </div>
         <div class="nav-group">
-          <div class="nav-label">Work</div>
-          <button data-tab="triage">Triage <small>Inbox</small></button>
-          <button data-tab="drafts">Drafts <small>Approval</small></button>
+          <div class="nav-label" data-copy="nav.groups.work">Work</div>
+          <button data-tab="triage"><span data-copy="nav.triage">Triage</span> <small data-copy="nav.triageSmall">Inbox</small></button>
+          <button data-tab="drafts"><span data-copy="nav.drafts">Drafts</span> <small data-copy="nav.draftsSmall">Approval</small></button>
         </div>
         <div class="nav-group">
-          <div class="nav-label">Automation</div>
-          <button data-tab="rules">Rules <small>Preview</small></button>
+          <div class="nav-label" data-copy="nav.groups.automation">Automation</div>
+          <button data-tab="rules"><span data-copy="nav.rules">Rules</span> <small data-copy="nav.rulesSmall">Preview</small></button>
         </div>
         <div class="nav-group">
-          <div class="nav-label">Workspace</div>
-          <button data-tab="import">Setup preview <small>Microsoft 365</small></button>
-          <button data-tab="admin">Admin <small>Settings</small></button>
+          <div class="nav-label" data-copy="nav.groups.workspace">Workspace</div>
+          <button data-tab="import"><span data-copy="nav.import">Setup preview</span> <small data-copy="nav.importSmall">Microsoft 365</small></button>
+          <button data-tab="admin"><span data-copy="nav.admin">Admin</span> <small data-copy="nav.adminSmall">Settings</small></button>
         </div>
       </nav>
-      <div class="aside-note">Courio uses fake local mailbox data in this prototype and suggests actions. It never sends email or modifies a real mailbox.</div>
+      <div class="aside-note" data-copy="brand.asideNote">Courio uses fake local mailbox data in this prototype and suggests actions. It never sends email or modifies a real mailbox.</div>
     </aside>
     <main>
       <div class="header">
@@ -118,7 +119,7 @@ app.innerHTML = `
           <h1 id="pageTitle"></h1>
           <p class="subtitle" id="pageSubtitle"></p>
         </div>
-        <div class="mode">Preview mode enabled</div>
+        <div class="mode" data-copy="brand.previewMode">Preview mode enabled</div>
       </div>
       <section id="dashboard" class="section"></section>
       <section id="import" class="section"></section>
@@ -255,6 +256,21 @@ function isAdvancedSettingsForm() {
   return getSettingsForm().mode === "Advanced";
 }
 
+function currentLanguage() {
+  return normalizeLanguage(state.settings.language);
+}
+
+function t(key) {
+  return createTranslator(currentLanguage())(key);
+}
+
+function renderShellCopy() {
+  const translate = createTranslator(currentLanguage());
+  document.querySelectorAll("[data-copy]").forEach((element) => {
+    element.textContent = translate(element.dataset.copy);
+  });
+}
+
 async function loadInitialData() {
   try {
     const [emails, categories, employees, rules, drafts, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listEmails(), listCategories(), listEmployees(), listRules(), listDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
@@ -281,8 +297,10 @@ async function loadInitialData() {
 }
 
 function render() {
-  document.querySelector("#pageTitle").textContent = copy[state.tab][0];
-  document.querySelector("#pageSubtitle").textContent = copy[state.tab][1];
+  const pageCopy = getPageCopy(state.tab, currentLanguage());
+  renderShellCopy();
+  document.querySelector("#pageTitle").textContent = pageCopy[0];
+  document.querySelector("#pageSubtitle").textContent = pageCopy[1];
   document.querySelectorAll(".section").forEach((section) => {
     section.classList.toggle("active", section.id === state.tab);
   });
@@ -1007,15 +1025,23 @@ function renderAdmin() {
   document.querySelector("#admin").innerHTML = `
     <div class="grid cols-2">
       <div class="panel">
-        <div class="panel-title"><h2>Workspace settings</h2><span>Prototype</span></div>
+        <div class="panel-title"><h2>${t("admin.workspaceSettings")}</h2><span>${t("admin.prototype")}</span></div>
         <div class="form-grid">
-          <label>Company name<input data-setting="companyName" value="${escapeHtml(formSettings.companyName || "Demo PME Inc.")}"></label>
-          <label>Mode
+          <label>${t("admin.companyName")}<input data-setting="companyName" value="${escapeHtml(formSettings.companyName || "Demo PME Inc.")}"></label>
+          <label>${t("admin.language")}
+            <select data-setting="language">
+              ${[
+                ["en", "English"],
+                ["fr", "Français"]
+              ].map(([value, label]) => `<option value="${value}" ${value === normalizeLanguage(formSettings.language) ? "selected" : ""}>${label}</option>`).join("")}
+            </select>
+          </label>
+          <label>${t("admin.mode")}
             <select data-setting="mode">
               ${["Simple", "Advanced"].map((mode) => `<option ${mode === formSettings.mode ? "selected" : ""}>${mode}</option>`).join("")}
             </select>
           </label>
-          <label>Escalation recipient<input data-setting="escalationRecipient" value="${escapeHtml(formSettings.escalationRecipient || "owner@company.ca")}"></label>
+          <label>${t("admin.escalationRecipient")}<input data-setting="escalationRecipient" value="${escapeHtml(formSettings.escalationRecipient || "owner@company.ca")}"></label>
           ${isAdvancedSettingsForm() ? `
           <label>Default mode
             <select data-setting="defaultMode">
@@ -1030,18 +1056,20 @@ function renderAdmin() {
             </select>
           </label>
           ` : `<div class="preview">Simple Mode keeps settings focused: company name, escalation recipient, and no automatic sending.</div>`}
-          <button class="btn primary" data-save-settings ${isBusy("settings") ? "disabled" : ""}>${isBusy("settings") ? "Saving..." : "Save settings"}</button>
-          <button class="btn danger" data-reset-demo ${isBusy("reset-demo") ? "disabled" : ""}>${isBusy("reset-demo") ? "Resetting..." : "Reset Demo Data"}</button>
+          <div class="preview">${t("admin.languageNote")}</div>
+          <button class="btn primary" data-save-settings ${isBusy("settings") ? "disabled" : ""}>${isBusy("settings") ? t("admin.saving") : t("admin.saveSettings")}</button>
+          <button class="btn danger" data-reset-demo ${isBusy("reset-demo") ? "disabled" : ""}>${isBusy("reset-demo") ? t("admin.resetting") : t("admin.resetDemoData")}</button>
         </div>
       </div>
       <div class="panel">
-        <div class="panel-title"><h2>Safety preview</h2><span>Prototype behavior</span></div>
+        <div class="panel-title"><h2>${t("admin.safetyPreview")}</h2><span>${t("admin.prototypeBehavior")}</span></div>
         <table class="table">
           <tr><td>No automatic sending</td><td>Enforced in this local demo</td></tr>
           <tr><td>Activity history</td><td>Simulated actions stored in this browser</td></tr>
           <tr><td>Account disconnect</td><td>Planned for a future provider integration</td></tr>
           <tr><td>Mailbox permissions</td><td>Not requested or connected in this prototype</td></tr>
           <tr><td>Saved workspace mode</td><td>${escapeHtml(state.settings.mode || "Simple")}</td></tr>
+          <tr><td>${t("admin.savedLanguage")}</td><td>${currentLanguage() === "fr" ? "Français" : "English"}</td></tr>
         </table>
       </div>
       <div class="panel">

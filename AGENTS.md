@@ -118,6 +118,30 @@ When modifying data structures:
 
 Future integrations will depend on stable models and predictable contracts.
 
+## Language and Localization Rule
+
+Courio supports English and French UI copy.
+
+When adding new features:
+
+- Add new user-facing UI text through the translation system, with English and French copy.
+- Prefer translation keys for buttons, labels, headings, helper text, empty states, confirmations, and toasts.
+- Translate display text, not business data contracts.
+- Do not translate internal IDs, API field names, workflow states, status values, category matching logic, or persisted localStorage contract values unless a migration is explicitly planned.
+- Keep internal values stable and map them to localized display labels in the UI.
+- Avoid scattered language checks such as `if (language === "fr")` throughout feature code; prefer central translation helpers.
+- If a feature adds a lot of copy, explain whether full French copy is included now or whether it is intentionally staged.
+
+Safe pattern:
+
+- Internal value: `workflowState: "draft_needed"`
+- English display: "Draft needed"
+- French display: "Brouillon requis"
+
+Unsafe pattern:
+
+- Changing the persisted workflow state itself to `"brouillon_requis"` without an approved migration.
+
 ## Design Preservation Rules
 
 The current Courio visual design direction is approved. Do not redesign the application unless explicitly requested.

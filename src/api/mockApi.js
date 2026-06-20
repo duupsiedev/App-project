@@ -123,6 +123,7 @@ const defaultState = {
   settings: {
     productName: "Courio",
     mode: "Simple",
+    language: "en",
     companyName: "Demo PME Inc.",
     defaultMode: "Observation only",
     escalationRecipient: "owner@company.ca",
@@ -886,6 +887,7 @@ export async function saveSettings(settings) {
   state.settings = {
     ...state.settings,
     ...settings,
+    language: settings.language ? (settings.language === "fr" ? "fr" : "en") : state.settings.language,
     approvalRequired: true,
     autoSend: false
   };
