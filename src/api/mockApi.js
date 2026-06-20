@@ -1,4 +1,5 @@
 import { mockEmails } from "../data/mockEmails.js";
+import { mockCategories } from "../data/mockCategories.js";
 import { mockEmployees } from "../data/mockEmployees.js";
 import { mockRules } from "../data/mockRules.js";
 
@@ -115,6 +116,7 @@ const setupImportPreview = {
 const defaultState = {
   schemaVersion: STATE_SCHEMA_VERSION,
   emails: mockEmails.map(createDefaultEmail),
+  categories: structuredClone(mockCategories),
   employees: structuredClone(mockEmployees),
   rules: structuredClone(mockRules),
   drafts: [],
@@ -174,6 +176,7 @@ function loadState() {
 function migrateState(parsed) {
   const deletedEmployeeIds = parsed.deletedEmployeeIds || [];
   const deletedRuleIds = parsed.deletedRuleIds || [];
+  const categories = mergeCategories(parsed.categories);
   const mergedEmails = mergeById(defaultState.emails, parsed.emails);
   const savedDrafts = Array.isArray(parsed.drafts) ? parsed.drafts : [];
   const canonicalDrafts = selectCanonicalDrafts(savedDrafts);
@@ -202,6 +205,7 @@ function migrateState(parsed) {
     ...parsed,
     schemaVersion: STATE_SCHEMA_VERSION,
     emails,
+    categories,
     employees: mergeById(
       defaultState.employees.filter((employee) => !deletedEmployeeIds.includes(employee.id)),
       (parsed.employees || []).filter((employee) => !deletedEmployeeIds.includes(employee.id))
@@ -219,6 +223,17 @@ function migrateState(parsed) {
     deletedEmployeeIds,
     deletedRuleIds
   };
+}
+
+function mergeCategories(savedCategories = []) {
+  const merged = mergeById(defaultState.categories, savedCategories);
+  return merged.map((category) => ({
+    description: "",
+    color: "default",
+    active: true,
+    system: false,
+    ...category
+  }));
 }
 
 function inferWorkflowState(email, draft, schemaVersion) {
@@ -512,6 +527,67 @@ function findEmployee(id) {
   return employee;
 }
 
+function findCategory(id) {
+  const category = state.categories.find((item) => item.id === id);
+  if (!category) throw new Error("Category not found.");
+  return category;
+}
+
+function findCategoryByName(name) {
+  return state.categories.find((category) => category.name.toLowerCase() === String(name || "").trim().toLowerCase());
+}
+
+function normalizeCategoryInput(category, existingId = null) {
+  const normalized = {
+    name: category.name?.trim() || "",
+    description: category.description?.trim() || "",
+    color: category.color || "default"
+  };
+
+  if (!normalized.name) throw new Error("Category name is required.");
+
+  const duplicate = state.categories.find((item) => (
+    item.id !== existingId
+    && item.name.toLowerCase() === normalized.name.toLowerCase()
+  ));
+  if (duplicate) {
+    throw new Error("A category with this name already exists.");
+  }
+
+  return normalized;
+}
+
+function replaceCategoryName(oldName, newName) {
+  state.emails.forEach((email) => {
+    if (email.category === oldName) email.category = newName;
+  });
+  state.rules.forEach((rule) => {
+    if (rule.category === oldName) rule.category = newName;
+  });
+}
+
+function categoryName(categoryId, fallbackName) {
+  return state.categories.find((category) => category.id === categoryId)?.name || fallbackName;
+}
+
+function buildSetupImportPreview() {
+  const categoryNames = {
+    "Client complaint": categoryName("cat-client-complaint", "Client complaint"),
+    Accounting: categoryName("cat-accounting", "Accounting"),
+    Sales: categoryName("cat-sales", "Sales"),
+    Documents: categoryName("cat-documents", "Documents"),
+    "Missing documents": categoryName("cat-missing-documents", "Missing documents"),
+    Scheduling: categoryName("cat-scheduling", "Scheduling"),
+    General: categoryName("cat-general", "General")
+  };
+  const preview = clone(setupImportPreview);
+  preview.mailboxes = preview.mailboxes.map((mailbox) => ({
+    ...mailbox,
+    categories: mailbox.categories.map((category) => categoryNames[category] || category)
+  }));
+  return preview;
+}
+
 function normalizeEmployeeInput(employee, existingId = null) {
   const normalized = {
     name: employee.name?.trim() || "",
@@ -553,10 +629,10 @@ function buildDigest() {
     urgentItems: urgent.map((email) => email.subject),
     draftsAwaitingApproval: waitingDrafts,
     readyForHumanSend: readyDrafts,
-    invoices: byCategory("Accounting").map((email) => email.subject),
-    missingDocuments: byCategory("Missing documents").map((email) => email.subject),
-    quoteRequests: byCategory("Sales").map((email) => email.subject),
-    clientComplaints: byCategory("Client complaint").map((email) => email.subject),
+    invoices: byCategory(categoryName("cat-accounting", "Accounting")).map((email) => email.subject),
+    missingDocuments: byCategory(categoryName("cat-missing-documents", "Missing documents")).map((email) => email.subject),
+    quoteRequests: byCategory(categoryName("cat-sales", "Sales")).map((email) => email.subject),
+    clientComplaints: byCategory(categoryName("cat-client-complaint", "Client complaint")).map((email) => email.subject),
     recommendedActions: [
       urgent.length ? "Review urgent client items first." : "No urgent client escalations are open.",
       waitingDrafts ? "Review drafts before marking them ready for human send." : "No drafts are waiting for approval.",
@@ -577,11 +653,11 @@ function getOrCreateInvoiceRule() {
     id: `rule-${Date.now()}`,
     title: "Invoice intake assistant",
     desc: "Flag invoice messages, payment questions, due dates, and supplier follow-ups for accounting review.",
-    category: "Accounting",
+    category: categoryName("cat-accounting", "Accounting"),
     confidence: 84,
     explanation: "Courio would look for invoice numbers, balance-due wording, supplier names, and payment timing.",
     impact: "Created locally from the assistant chat. It only previews matches in this prototype.",
-    matches: state.emails.filter((email) => email.category === "Accounting").map((email) => email.subject),
+    matches: state.emails.filter((email) => email.category === categoryName("cat-accounting", "Accounting")).map((email) => email.subject),
     on: true
   };
   state.rules.push(rule);
@@ -653,7 +729,8 @@ function assistantMessageMatches(message, aliases) {
 function answerAssistantCommand(rawMessage, context = {}) {
   const message = normalizeAssistantMessage(rawMessage);
   const urgentCount = state.emails.filter((email) => !emailIsComplete(email) && email.urgency === "High").length;
-  const invoiceCount = state.emails.filter((email) => !emailIsComplete(email) && email.category === "Accounting").length;
+  const invoiceCategory = categoryName("cat-accounting", "Accounting");
+  const invoiceCount = state.emails.filter((email) => !emailIsComplete(email) && email.category === invoiceCategory).length;
   const waitingDrafts = state.drafts
     .map(buildDraftView)
     .filter((draft) => draft.canSelectForBulkApproval)
@@ -685,7 +762,7 @@ function answerAssistantCommand(rawMessage, context = {}) {
 
   if (mentionsInvoice) {
     return {
-      text: `${invoiceCount} invoice-related emails are open. I switched Triage to Accounting.`,
+      text: `${invoiceCount} invoice-related emails are open. I switched Triage to ${invoiceCategory}.`,
       action: { type: "show_triage", filter: "invoices" }
     };
   }
@@ -739,6 +816,11 @@ export async function listEmployees() {
   return clone(state.employees);
 }
 
+export async function listCategories() {
+  await delay(300);
+  return clone(state.categories);
+}
+
 export async function listRules() {
   await delay(400);
   return clone(state.rules);
@@ -746,7 +828,7 @@ export async function listRules() {
 
 export async function getSetupImportPreview() {
   await delay(350);
-  return clone(setupImportPreview);
+  return buildSetupImportPreview();
 }
 
 export async function generateMorningDigest() {
@@ -977,6 +1059,9 @@ export async function updateRule(id, updates) {
   if (!rule) throw new Error("Rule not found.");
   if (!updates.title?.trim()) throw new Error("Rule name is required.");
   if (!updates.desc?.trim()) throw new Error("Rule description is required.");
+  if (updates.category && !findCategoryByName(updates.category)) {
+    throw new Error("Choose an existing category before saving.");
+  }
 
   rule.title = updates.title.trim();
   rule.desc = updates.desc.trim();
@@ -1011,10 +1096,56 @@ export async function markEmailDone(id) {
 export async function updateEmailCategory(id, category) {
   await delay(400);
   if (!category) throw new Error("Choose a category before saving.");
+  if (!findCategoryByName(category)) throw new Error("Choose an existing category before saving.");
   const email = findEmail(id);
   email.category = category;
   persistState();
   return clone(email);
+}
+
+export async function createCategory(category) {
+  await delay(450);
+  const normalized = normalizeCategoryInput(category);
+  const created = {
+    id: `cat-${Date.now()}`,
+    ...normalized,
+    active: true,
+    system: false
+  };
+  state.categories.push(created);
+  recordActivity("category-added", {
+    categoryId: created.id,
+    label: `Category added: ${created.name}`
+  });
+  persistState();
+  return clone(created);
+}
+
+export async function updateCategory(id, updates) {
+  await delay(450);
+  const category = findCategory(id);
+  const normalized = normalizeCategoryInput(updates, id);
+  const oldName = category.name;
+  Object.assign(category, normalized);
+  if (oldName !== category.name) replaceCategoryName(oldName, category.name);
+  recordActivity("category-updated", {
+    categoryId: category.id,
+    label: `Category updated: ${category.name}`
+  });
+  persistState();
+  return clone(category);
+}
+
+export async function toggleCategoryActive(id) {
+  await delay(400);
+  const category = findCategory(id);
+  category.active = !category.active;
+  recordActivity("category-toggled", {
+    categoryId: category.id,
+    label: `${category.active ? "Category restored" : "Category archived"}: ${category.name}`
+  });
+  persistState();
+  return clone(category);
 }
 
 export async function assignEmail(id, employeeId) {

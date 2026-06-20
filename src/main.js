@@ -5,6 +5,7 @@ import {
   approveDrafts,
   approveLowRiskDrafts,
   assignEmail,
+  createCategory,
   createEmployee,
   deleteEmployee,
   deleteRule,
@@ -17,6 +18,7 @@ import {
   getSetupImportPreview,
   listActivity,
   listAssistantMessages,
+  listCategories,
   listEmployees,
   listDrafts,
   listEmails,
@@ -26,7 +28,9 @@ import {
   saveDraft,
   sendAssistantCommand,
   summarizeThread,
+  toggleCategoryActive,
   toggleRule,
+  updateCategory,
   updateEmployee,
   updateRule,
   updateEmailCategory
@@ -47,6 +51,7 @@ const ASSISTANT_SUGGESTIONS = [
 const state = {
   tab: "dashboard",
   emails: [],
+  categories: [],
   employees: [],
   rules: [],
   drafts: [],
@@ -66,6 +71,7 @@ const state = {
   },
   busy: {},
   selectedEmail: null,
+  selectedCategory: null,
   selectedDraft: null,
   selectedRule: null,
   selectedEmployee: null,
@@ -184,6 +190,7 @@ function navigateTo(tab, options = {}) {
 
   if (options.closeDrawers !== false) {
     state.selectedEmail = null;
+    state.selectedCategory = null;
     state.selectedDraft = null;
     state.selectedRule = null;
     state.selectedEmployee = null;
@@ -202,12 +209,45 @@ async function refreshEmails(keepSelectedId = state.selectedEmail?.id) {
   }
 }
 
+async function refreshCategoryState(keepSelectedId = state.selectedCategory?.id) {
+  const [categories, emails, rules, digest, setupPreview, activity] = await Promise.all([
+    listCategories(),
+    listEmails(),
+    listRules(),
+    generateMorningDigest(),
+    getSetupImportPreview(),
+    listActivity()
+  ]);
+
+  state.categories = categories;
+  state.emails = emails;
+  state.rules = rules;
+  state.digest = digest;
+  state.setupPreview = setupPreview;
+  state.activity = activity;
+  state.selectedCategory = keepSelectedId
+    ? categories.find((category) => category.id === keepSelectedId) || null
+    : null;
+}
+
 function isDraftReady(draft) {
   return Boolean(draft?.isReadyForHumanSend);
 }
 
 function isAdvancedMode() {
   return state.settings.mode === "Advanced";
+}
+
+function activeCategoriesFor(currentName = "") {
+  const active = state.categories.filter((category) => category.active);
+  const current = currentName ? state.categories.find((category) => category.name === currentName) : null;
+  return current && !active.some((category) => category.id === current.id)
+    ? [...active, current]
+    : active;
+}
+
+function categoryNameById(id, fallback) {
+  return state.categories.find((category) => category.id === id)?.name || fallback;
 }
 
 function lowRiskBulkApprovalEnabled() {
@@ -237,8 +277,9 @@ function isAdvancedSettingsForm() {
 
 async function loadInitialData() {
   try {
-    const [emails, employees, rules, drafts, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listEmails(), listEmployees(), listRules(), listDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
+    const [emails, categories, employees, rules, drafts, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listEmails(), listCategories(), listEmployees(), listRules(), listDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
     state.emails = emails;
+    state.categories = categories;
     state.employees = employees;
     state.rules = rules;
     state.drafts = drafts;
@@ -422,9 +463,10 @@ function renderImport() {
 
 function renderTriage() {
   const employeeById = Object.fromEntries(state.employees.map((employee) => [employee.id, employee]));
+  const accountingCategory = categoryNameById("cat-accounting", "Accounting");
   const filteredEmails = state.emails.filter((email) => {
     if (state.triageFilter === "urgent") return email.status !== "Done" && email.urgency === "High";
-    if (state.triageFilter === "invoices") return email.status !== "Done" && email.category === "Accounting";
+    if (state.triageFilter === "invoices") return email.status !== "Done" && email.category === accountingCategory;
     return true;
   });
   const table = state.loading.emails
@@ -474,6 +516,11 @@ function renderTriage() {
 
 function renderDrawer() {
   const root = document.querySelector("#drawerRoot");
+  if (state.selectedCategory) {
+    renderCategoryDrawer(root);
+    return;
+  }
+
   if (state.selectedEmployee) {
     renderEmployeeDrawer(root);
     return;
@@ -497,7 +544,7 @@ function renderDrawer() {
   const email = state.selectedEmail;
   const emailDone = email.status === "Done";
   const assignedEmployee = state.employees.find((employee) => employee.id === email.assignedTo);
-  const categories = ["Client complaint", "Accounting", "Sales", "Documents", "Missing documents", "Scheduling", "General"];
+  const categories = activeCategoriesFor(email.category);
 
   root.innerHTML = `
     <div class="drawer-backdrop" data-close-drawer></div>
@@ -519,7 +566,7 @@ function renderDrawer() {
       <div class="drawer-grid">
         <label>Category
           <select data-email-category="${email.id}">
-            ${categories.map((category) => `<option value="${category}" ${category === email.category ? "selected" : ""}>${category}</option>`).join("")}
+            ${categories.map((category) => `<option value="${escapeHtml(category.name)}" ${category.name === email.category ? "selected" : ""}>${escapeHtml(category.name)}${category.active ? "" : " (archived)"}</option>`).join("")}
           </select>
         </label>
         <label>Assigned employee
@@ -603,6 +650,9 @@ async function openGeneratedDraft(emailId) {
   await refreshEmails(emailId);
   state.selectedDraft = await getDraftDetail(draft.id);
   state.selectedEmail = null;
+  state.selectedRule = null;
+  state.selectedEmployee = null;
+  state.selectedCategory = null;
 }
 
 async function approveDraftWorkflow(draftId) {
@@ -677,7 +727,7 @@ function renderDraftDrawer(root) {
 
 function renderRuleDrawer(root) {
   const rule = state.selectedRule;
-  const categories = ["Client complaint", "Accounting", "Sales", "Documents", "Missing documents", "Scheduling", "General"];
+  const categories = activeCategoriesFor(rule.category);
 
   root.innerHTML = `
     <div class="drawer-backdrop" data-close-drawer></div>
@@ -696,7 +746,7 @@ function renderRuleDrawer(root) {
         <label>Description<textarea data-rule-field="desc">${escapeHtml(rule.desc)}</textarea></label>
         <label>Category
           <select data-rule-field="category">
-            ${categories.map((category) => `<option value="${category}" ${category === rule.category ? "selected" : ""}>${category}</option>`).join("")}
+            ${categories.map((category) => `<option value="${escapeHtml(category.name)}" ${category.name === rule.category ? "selected" : ""}>${escapeHtml(category.name)}${category.active ? "" : " (archived)"}</option>`).join("")}
           </select>
         </label>
       </div>
@@ -723,6 +773,49 @@ function renderRuleDrawer(root) {
         <button class="btn danger" data-delete-rule="${rule.id}">Delete rule</button>
         <button class="btn subtle" data-close-drawer>Close</button>
       </div>
+    </aside>
+  `;
+}
+
+function renderCategoryDrawer(root) {
+  const category = state.selectedCategory;
+  const isNew = category.id === "new";
+  const colorOptions = [
+    ["default", "Default"],
+    ["urgent", "Red / urgent"],
+    ["invoice", "Green"],
+    ["lead", "Blue"],
+    ["pending", "Amber"]
+  ];
+
+  root.innerHTML = `
+    <div class="drawer-backdrop" data-close-drawer></div>
+    <aside class="review-drawer" aria-label="${isNew ? "Add category" : "Edit category"}">
+      <div class="drawer-header">
+        <div>
+          <div class="badge ${badgeClass(category.name)}">${category.active === false ? "Archived" : "Active"}</div>
+          <h2>${isNew ? "Add category" : "Edit category"}</h2>
+          <p>Categories remain fake/local and map to email category names for now.</p>
+        </div>
+        <button class="btn subtle" data-close-drawer>Close</button>
+      </div>
+
+      <div class="drawer-section">
+        <label>Category name<input data-category-field="name" value="${escapeHtml(category.name || "")}"></label>
+        <label>Description<textarea data-category-field="description">${escapeHtml(category.description || "")}</textarea></label>
+        <label>Badge color
+          <select data-category-field="color">
+            ${colorOptions.map(([value, label]) => `<option value="${value}" ${value === (category.color || "default") ? "selected" : ""}>${label}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+
+      <div class="drawer-actions">
+        <button class="btn primary" data-save-category="${category.id}" ${isBusy(`save-category-${category.id}`) ? "disabled" : ""}>${isBusy(`save-category-${category.id}`) ? "Saving..." : isNew ? "Add category" : "Save changes"}</button>
+        ${isNew ? "" : `<button class="btn subtle" data-toggle-category="${category.id}" ${isBusy(`toggle-category-${category.id}`) ? "disabled" : ""}>${category.active === false ? "Restore category" : "Archive category"}</button>`}
+        <button class="btn subtle" data-close-drawer>Close</button>
+      </div>
+      <p class="drawer-note">Archiving removes a category from new dropdown choices, but old emails and rules still display safely.</p>
     </aside>
   `;
 }
@@ -934,6 +1027,7 @@ async function applyAssistantAction(action) {
     state.selectedDraft = null;
     state.selectedRule = null;
     state.selectedEmployee = null;
+    state.selectedCategory = null;
     state.summary = "";
     state.showExplanation = true;
     navigateTo("triage", { triageFilter: "all", closeDrawers: false });
@@ -946,6 +1040,7 @@ async function applyAssistantAction(action) {
     state.selectedEmail = null;
     state.selectedDraft = null;
     state.selectedEmployee = null;
+    state.selectedCategory = null;
     navigateTo("rules", { closeDrawers: false });
     return;
   }
@@ -1026,6 +1121,28 @@ function renderAdmin() {
             </table>`}
       </div>
       <div class="panel">
+        <div class="panel-title">
+          <div><h2>Categories</h2><span>Local labels</span></div>
+          <button class="btn primary" data-add-category>Add category</button>
+        </div>
+        ${state.categories.length === 0
+          ? `<div class="empty-state">No categories yet. Add one to make triage choices available.</div>`
+          : `<table class="table">
+              <thead><tr><th>Name</th><th>Description</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                ${state.categories.map((category) => `
+                  <tr>
+                    <td><span class="badge ${badgeClass(category.name)}">${escapeHtml(category.name)}</span>${category.system ? `<br><small>System default</small>` : ""}</td>
+                    <td>${escapeHtml(category.description || "No description yet.")}</td>
+                    <td>${category.active ? "Active" : "Archived"}</td>
+                    <td><button class="btn subtle" data-edit-category="${category.id}">Edit</button></td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>`}
+        <div class="preview" style="margin-top:14px">Archiving hides a category from new dropdown choices. Existing emails and rules keep displaying safely.</div>
+      </div>
+      <div class="panel">
         <div class="panel-title"><h2>Recent activity</h2><span>Local audit preview</span></div>
         ${state.activity.length === 0
           ? `<div class="empty-state">No activity yet. Completed workflows and team changes will appear here.</div>`
@@ -1043,6 +1160,8 @@ function renderAdmin() {
 }
 
 function badgeClass(label) {
+  const category = state.categories.find((item) => item.name === label);
+  if (category?.color && category.color !== "default") return category.color;
   if (label === "Urgent" || label === "Client complaint") return "urgent";
   if (label === "Accounting" || label === "Documents" || label === "Missing documents") return "invoice";
   if (label === "Sales") return "lead";
@@ -1153,6 +1272,7 @@ document.addEventListener("click", async (event) => {
       state.selectedEmail = null;
       state.selectedRule = null;
       state.selectedEmployee = null;
+      state.selectedCategory = null;
       state.summary = "";
       state.showExplanation = false;
     }, "Draft opened for review.");
@@ -1165,6 +1285,7 @@ document.addEventListener("click", async (event) => {
       state.selectedEmail = null;
       state.selectedRule = null;
       state.selectedEmployee = null;
+      state.selectedCategory = null;
       state.summary = "";
       state.showExplanation = false;
     }, "Draft opened for editing.");
@@ -1175,6 +1296,7 @@ document.addEventListener("click", async (event) => {
     state.selectedDraft = null;
     state.selectedRule = null;
     state.selectedEmployee = null;
+    state.selectedCategory = null;
     state.summary = "";
     state.showExplanation = false;
     render();
@@ -1236,6 +1358,7 @@ document.addEventListener("click", async (event) => {
       state.selectedEmail = null;
       state.selectedDraft = null;
       state.selectedEmployee = null;
+      state.selectedCategory = null;
     }, "Rule opened for local editing.");
   }
 
@@ -1276,6 +1399,7 @@ document.addEventListener("click", async (event) => {
     state.selectedEmail = null;
     state.selectedDraft = null;
     state.selectedRule = null;
+    state.selectedCategory = null;
     render();
   }
 
@@ -1284,6 +1408,7 @@ document.addEventListener("click", async (event) => {
     state.selectedEmail = null;
     state.selectedDraft = null;
     state.selectedRule = null;
+    state.selectedCategory = null;
     render();
   }
 
@@ -1313,6 +1438,50 @@ document.addEventListener("click", async (event) => {
       tone: "danger"
     };
     render();
+  }
+
+  if (target.dataset.addCategory !== undefined) {
+    state.selectedCategory = {
+      id: "new",
+      name: "",
+      description: "",
+      color: "default",
+      active: true,
+      system: false
+    };
+    state.selectedEmail = null;
+    state.selectedDraft = null;
+    state.selectedRule = null;
+    state.selectedEmployee = null;
+    render();
+  }
+
+  if (target.dataset.editCategory) {
+    state.selectedCategory = state.categories.find((category) => category.id === target.dataset.editCategory) || null;
+    state.selectedEmail = null;
+    state.selectedDraft = null;
+    state.selectedRule = null;
+    state.selectedEmployee = null;
+    render();
+  }
+
+  if (target.dataset.saveCategory) {
+    const id = target.dataset.saveCategory;
+    const fields = Object.fromEntries(
+      [...document.querySelectorAll("[data-category-field]")].map((input) => [input.dataset.categoryField, input.value])
+    );
+    await runAction(`save-category-${id}`, async () => {
+      const saved = id === "new" ? await createCategory(fields) : await updateCategory(id, fields);
+      await refreshCategoryState(saved.id);
+    }, id === "new" ? "Category added locally." : "Category changes saved locally.");
+  }
+
+  if (target.dataset.toggleCategory) {
+    const id = target.dataset.toggleCategory;
+    await runAction(`toggle-category-${id}`, async () => {
+      const saved = await toggleCategoryActive(id);
+      await refreshCategoryState(saved.id);
+    }, "Category visibility updated locally.");
   }
 
   if (target.dataset.approveDraft) {
