@@ -120,6 +120,7 @@ const defaultState = {
   employees: structuredClone(mockEmployees),
   rules: structuredClone(mockRules),
   drafts: [],
+  tasks: [],
   settings: {
     productName: "Courio",
     mode: "Simple",
@@ -220,6 +221,7 @@ function migrateState(parsed) {
       (parsed.rules || []).filter((rule) => !deletedRuleIds.includes(rule.id))
     ),
     drafts,
+    tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(normalizeTask) : [],
     settings: {
       ...defaultState.settings,
       ...(parsed.settings || {})
@@ -313,6 +315,22 @@ function normalizeDraft(draft) {
   return {
     ...draftData,
     emailId: draft.emailId || draft.id
+  };
+}
+
+function normalizeTask(task) {
+  return {
+    id: task.id || `task-${task.emailId || Date.now()}`,
+    emailId: task.emailId || "",
+    title: task.title || "Review email",
+    description: task.description || "",
+    priority: task.priority || "Medium",
+    category: task.category || "General",
+    status: task.status === "Done" ? "Done" : "Open",
+    notes: task.notes || "",
+    createdAt: task.createdAt || new Date().toISOString(),
+    updatedAt: task.updatedAt || task.createdAt || new Date().toISOString(),
+    completedAt: task.completedAt || null
   };
 }
 
@@ -484,6 +502,67 @@ function buildEmailView(email) {
         : draftStarted
           ? "Open the existing draft to continue this workflow."
           : ""
+  };
+}
+
+function taskPriorityForEmail(email) {
+  if (email.urgency === "High") return "High";
+  if (email.category === categoryName("cat-client-complaint", "Client complaint")) return "High";
+  if (email.urgency === "Low") return "Low";
+  return "Medium";
+}
+
+function taskRank(task) {
+  const priorityRanks = { High: 0, Medium: 1, Low: 2 };
+  return priorityRanks[task.priority] ?? 3;
+}
+
+function createTaskFromEmail(email) {
+  const now = new Date().toISOString();
+  return normalizeTask({
+    id: `task-${email.id}`,
+    emailId: email.id,
+    title: email.suggestedAction || `Review ${email.subject}`,
+    description: email.summary || email.explanation || email.subject,
+    priority: taskPriorityForEmail(email),
+    category: email.category,
+    status: "Open",
+    notes: "",
+    createdAt: now,
+    updatedAt: now
+  });
+}
+
+function syncTasksFromEmails() {
+  const existingIds = new Set(state.tasks.map((task) => task.emailId));
+  visibleEmails()
+    .filter((email) => !emailIsComplete(email))
+    .forEach((email) => {
+      if (!existingIds.has(email.id)) {
+        state.tasks.push(createTaskFromEmail(email));
+      }
+    });
+
+  state.tasks = state.tasks.map((task) => {
+    const email = state.emails.find((item) => item.id === task.emailId);
+    if (!email) return normalizeTask(task);
+    return normalizeTask({
+      ...task,
+      title: task.title || email.suggestedAction,
+      description: task.description || email.summary || email.explanation,
+      priority: task.priority || taskPriorityForEmail(email),
+      category: email.category
+    });
+  });
+}
+
+function buildTaskView(task) {
+  const email = state.emails.find((item) => item.id === task.emailId);
+  return {
+    ...task,
+    sourceEmail: email ? buildEmailView(email) : null,
+    hiddenFromInbox: Boolean(email?.archivedAt),
+    sourceCompleted: email ? emailIsComplete(email) : false
   };
 }
 
@@ -824,6 +903,22 @@ export async function listEmails() {
   return clone(visibleEmails().map(buildEmailView));
 }
 
+export async function listTasks() {
+  await delay(350);
+  syncTasksFromEmails();
+  persistState();
+  return clone(
+    state.tasks
+      .map(buildTaskView)
+      .filter((task) => !task.hiddenFromInbox)
+      .sort((left, right) => (
+        taskRank(left) - taskRank(right)
+        || (left.status === "Done") - (right.status === "Done")
+        || left.createdAt.localeCompare(right.createdAt)
+      ))
+  );
+}
+
 export async function listEmployees() {
   await delay(350);
   return clone(state.employees);
@@ -1142,6 +1237,34 @@ export async function archiveEmails(ids, reason = "Removed from demo inbox") {
   });
   persistState();
   return clone(archived.map(buildEmailView));
+}
+
+export async function updateTask(id, updates = {}) {
+  await delay(400);
+  syncTasksFromEmails();
+  const task = state.tasks.find((item) => item.id === id);
+  if (!task) throw new Error("Task not found.");
+
+  const wasDone = task.status === "Done";
+  if (updates.notes !== undefined) {
+    task.notes = String(updates.notes).trim();
+  }
+  if (updates.status !== undefined) {
+    task.status = updates.status === "Done" ? "Done" : "Open";
+    task.completedAt = task.status === "Done" ? task.completedAt || new Date().toISOString() : null;
+  }
+  task.updatedAt = new Date().toISOString();
+
+  if (!wasDone && task.status === "Done") {
+    recordActivity("task-completed", {
+      taskId: task.id,
+      emailId: task.emailId,
+      label: `Task completed: ${task.title}`
+    });
+  }
+
+  persistState();
+  return clone(buildTaskView(task));
 }
 
 export async function createCategory(category) {

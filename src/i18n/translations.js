@@ -16,6 +16,8 @@ const translations = {
       dashboardSmall: "Today",
       triage: "Triage",
       triageSmall: "Inbox",
+      tasks: "Tasks",
+      tasksSmall: "Priority",
       drafts: "Drafts",
       draftsSmall: "Approval",
       rules: "Rules",
@@ -29,6 +31,7 @@ const translations = {
       dashboard: ["Overview", "A local workflow preview for email triage, summaries, routing suggestions, and draft preparation."],
       import: ["Setup preview", "Preview how a future Microsoft 365 connection could import mailbox structure and workflow patterns."],
       triage: ["Inbox triage", "Review AI-classified messages before any action is taken."],
+      tasks: ["Action Center", "Turn important local inbox items into a priority work list."],
       rules: ["Rules", "Approve or adjust local rule previews. They do not affect a real mailbox."],
       drafts: ["Drafts", "Review prepared replies and mark them ready for a person to send."],
       admin: ["Admin", "Manage local workspace preferences and preview future integration safeguards."]
@@ -66,6 +69,29 @@ const translations = {
       removeFilteredConfirmTitle: "Remove filtered emails from the demo inbox?",
       removeFilteredConfirmMessage: "This only hides fake/local demo emails. Number selected:",
       removeSuccess: "Email removed from the demo inbox locally."
+    },
+    tasks: {
+      title: "Priority tasks",
+      subtitle: "Generated from the local demo inbox",
+      empty: "No tasks yet. New local inbox items will appear here as work to review.",
+      done: "Done",
+      task: "Task",
+      priority: "Priority",
+      source: "Source email",
+      notes: "Notes",
+      notePlaceholder: "Add a local note",
+      reviewEmail: "Review email",
+      saveNote: "Save note",
+      saving: "Saving...",
+      noteSaved: "Task note saved locally.",
+      completedToast: "Task checked off locally.",
+      reopenedToast: "Task reopened locally.",
+      openTasks: "Open tasks",
+      openCaption: "From fake/local inbox items",
+      highPriority: "High priority",
+      highCaption: "Review these first",
+      completed: "Completed",
+      completedCaption: "Checked off in this browser"
     }
   },
   fr: {
@@ -85,6 +111,8 @@ const translations = {
       dashboardSmall: "Aujourd'hui",
       triage: "Tri",
       triageSmall: "Boîte de réception",
+      tasks: "Tâches",
+      tasksSmall: "Priorité",
       drafts: "Brouillons",
       draftsSmall: "Approbation",
       rules: "Règles",
@@ -98,6 +126,7 @@ const translations = {
       dashboard: ["Aperçu", "Aperçu local des flux de tri courriel, résumés, suggestions de routage et préparation de brouillons."],
       import: ["Aperçu configuration", "Aperçu de la façon dont une future connexion Microsoft 365 pourrait importer la structure de boîte courriel et les habitudes de travail."],
       triage: ["Tri de la boîte courriel", "Révisez les messages classés par l'IA avant toute action."],
+      tasks: ["Centre d'action", "Transformez les courriels locaux importants en liste de travail priorisée."],
       rules: ["Règles", "Approuvez ou ajustez les aperçus de règles locales. Elles ne touchent aucune vraie boîte courriel."],
       drafts: ["Brouillons", "Révisez les réponses préparées et marquez-les prêtes pour un envoi humain."],
       admin: ["Admin", "Gérez les préférences locales de l'espace de travail et les protections des futures intégrations."]
@@ -135,6 +164,29 @@ const translations = {
       removeFilteredConfirmTitle: "Retirer les courriels filtrés de la boîte de démo?",
       removeFilteredConfirmMessage: "Cela cache seulement des faux courriels locaux. Nombre sélectionné:",
       removeSuccess: "Courriel retiré localement de la boîte de démo."
+    },
+    tasks: {
+      title: "Tâches prioritaires",
+      subtitle: "Générées à partir de la boîte locale de démo",
+      empty: "Aucune tâche pour l'instant. Les nouveaux courriels locaux apparaîtront ici comme travail à réviser.",
+      done: "Fait",
+      task: "Tâche",
+      priority: "Priorité",
+      source: "Courriel source",
+      notes: "Notes",
+      notePlaceholder: "Ajouter une note locale",
+      reviewEmail: "Réviser le courriel",
+      saveNote: "Enregistrer la note",
+      saving: "Enregistrement...",
+      noteSaved: "Note de tâche enregistrée localement.",
+      completedToast: "Tâche cochée localement.",
+      reopenedToast: "Tâche rouverte localement.",
+      openTasks: "Tâches ouvertes",
+      openCaption: "Depuis les faux courriels locaux",
+      highPriority: "Priorité élevée",
+      highCaption: "À réviser en premier",
+      completed: "Terminées",
+      completedCaption: "Cochées dans ce navigateur"
     }
   }
 };

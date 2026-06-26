@@ -26,6 +26,7 @@ import {
   listDrafts,
   listEmails,
   listRules,
+  listTasks,
   resetDemoData,
   saveSettings,
   saveDraft,
@@ -36,11 +37,12 @@ import {
   updateCategory,
   updateEmployee,
   updateRule,
-  updateEmailCategory
+  updateEmailCategory,
+  updateTask
 } from "./api/mockApi.js";
 
 const app = document.querySelector("#app");
-const VALID_TABS = new Set(["dashboard", "import", "triage", "rules", "drafts", "admin"]);
+const VALID_TABS = new Set(["dashboard", "import", "triage", "tasks", "rules", "drafts", "admin"]);
 
 const state = {
   tab: "dashboard",
@@ -49,6 +51,7 @@ const state = {
   employees: [],
   rules: [],
   drafts: [],
+  tasks: [],
   settings: {
     companyName: "Demo PME Inc.",
     language: "en",
@@ -101,6 +104,7 @@ app.innerHTML = `
         <div class="nav-group">
           <div class="nav-label" data-copy="nav.groups.work">Work</div>
           <button data-tab="triage"><span data-copy="nav.triage">Triage</span> <small data-copy="nav.triageSmall">Inbox</small></button>
+          <button data-tab="tasks"><span data-copy="nav.tasks">Tasks</span> <small data-copy="nav.tasksSmall">Priority</small></button>
           <button data-tab="drafts"><span data-copy="nav.drafts">Drafts</span> <small data-copy="nav.draftsSmall">Approval</small></button>
         </div>
         <div class="nav-group">
@@ -126,6 +130,7 @@ app.innerHTML = `
       <section id="dashboard" class="section"></section>
       <section id="import" class="section"></section>
       <section id="triage" class="section"></section>
+      <section id="tasks" class="section"></section>
       <section id="rules" class="section"></section>
       <section id="drafts" class="section"></section>
       <section id="admin" class="section"></section>
@@ -302,12 +307,13 @@ function renderShellCopy() {
 
 async function loadInitialData() {
   try {
-    const [emails, categories, employees, rules, drafts, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listEmails(), listCategories(), listEmployees(), listRules(), listDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
+    const [emails, categories, employees, rules, drafts, tasks, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listEmails(), listCategories(), listEmployees(), listRules(), listDrafts(), listTasks(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
     state.emails = emails;
     state.categories = categories;
     state.employees = employees;
     state.rules = rules;
     state.drafts = drafts;
+    state.tasks = tasks;
     state.settings = { ...state.settings, ...settings };
     state.settingsForm = null;
     state.digest = digest;
@@ -340,6 +346,7 @@ function render() {
   renderDashboard();
   renderImport();
   renderTriage();
+  renderTasks();
   renderRules();
   renderDrafts();
   renderAdmin();
@@ -544,6 +551,58 @@ function renderTriage() {
         <span class="mode">${escapeHtml(selectedCategoryLabel)}</span>
       </div>
       ${table}
+    </div>
+  `;
+}
+
+function renderTasks() {
+  const openCount = state.tasks.filter((task) => task.status !== "Done").length;
+  const highCount = state.tasks.filter((task) => task.status !== "Done" && task.priority === "High").length;
+  const content = state.tasks.length === 0
+    ? `<div class="empty-state">${t("tasks.empty")}</div>`
+    : `<table class="table">
+        <thead><tr><th>${t("tasks.done")}</th><th>${t("tasks.task")}</th><th>${t("tasks.priority")}</th><th>${t("tasks.source")}</th><th>${t("tasks.notes")}</th><th></th></tr></thead>
+        <tbody>
+          ${state.tasks.map((task) => `
+            <tr>
+              <td><input type="checkbox" data-task-status="${task.id}" ${task.status === "Done" ? "checked" : ""}></td>
+              <td>
+                <strong>${escapeHtml(task.title)}</strong><br>
+                <small>${escapeHtml(task.description)}</small>
+              </td>
+              <td><span class="badge ${task.priority === "High" ? "urgent" : task.priority === "Low" ? "done" : "pending"}">${escapeHtml(task.priority)}</span><br><small>${escapeHtml(task.category)}</small></td>
+              <td>${escapeHtml(task.sourceEmail?.subject || "Local task")}<br><small>${escapeHtml(task.sourceEmail?.sender || "Demo inbox")}</small></td>
+              <td><textarea data-task-note="${task.id}" placeholder="${t("tasks.notePlaceholder")}">${escapeHtml(task.notes || "")}</textarea></td>
+              <td class="actions">
+                ${task.sourceEmail ? `<button class="btn subtle" data-review-email="${task.sourceEmail.id}">${t("tasks.reviewEmail")}</button>` : ""}
+                <button class="btn subtle" data-save-task-note="${task.id}" ${isBusy(`task-note-${task.id}`) ? "disabled" : ""}>${isBusy(`task-note-${task.id}`) ? t("tasks.saving") : t("tasks.saveNote")}</button>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>`;
+
+  document.querySelector("#tasks").innerHTML = `
+    <div class="grid cols-3">
+      <div class="panel metric">
+        <div class="label">${t("tasks.openTasks")}</div>
+        <div class="value">${openCount}</div>
+        <div class="caption">${t("tasks.openCaption")}</div>
+      </div>
+      <div class="panel metric positive">
+        <div class="label">${t("tasks.highPriority")}</div>
+        <div class="value">${highCount}</div>
+        <div class="caption">${t("tasks.highCaption")}</div>
+      </div>
+      <div class="panel metric">
+        <div class="label">${t("tasks.completed")}</div>
+        <div class="value">${state.tasks.filter((task) => task.status === "Done").length}</div>
+        <div class="caption">${t("tasks.completedCaption")}</div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <div class="panel-title"><h2>${t("tasks.title")}</h2><span>${t("tasks.subtitle")}</span></div>
+      ${content}
     </div>
   `;
 }
@@ -1236,6 +1295,7 @@ document.addEventListener("click", async (event) => {
       await runAction("archive-emails", async () => {
         await archiveEmails(dialog.emailIds, dialog.reason);
         state.emails = await listEmails();
+        state.tasks = await listTasks();
         state.digest = await generateMorningDigest();
         state.activity = await listActivity();
         state.selectedEmail = null;
@@ -1313,6 +1373,7 @@ document.addEventListener("click", async (event) => {
       state.selectedDraft = null;
       state.selectedRule = null;
       state.selectedEmployee = null;
+      state.selectedCategory = null;
       state.summary = "";
       state.showExplanation = false;
     }, "Message thread opened.");
@@ -1342,6 +1403,17 @@ document.addEventListener("click", async (event) => {
       state.summary = "";
       state.showExplanation = false;
     }, "Draft opened for editing.");
+  }
+
+  if (target.dataset.saveTaskNote) {
+    const id = target.dataset.saveTaskNote;
+    const note = document.querySelector(`[data-task-note="${id}"]`)?.value || "";
+    await runAction(`task-note-${id}`, async () => {
+      await updateTask(id, { notes: note });
+      state.tasks = await listTasks();
+      state.activity = await listActivity();
+    }, t("tasks.noteSaved"));
+    return;
   }
 
   if (target.dataset.closeDrawer !== undefined) {
@@ -1605,6 +1677,16 @@ document.addEventListener("change", async (event) => {
     return;
   }
 
+  if (target.dataset.taskStatus) {
+    const id = target.dataset.taskStatus;
+    await runAction(`task-status-${id}`, async () => {
+      await updateTask(id, { status: target.checked ? "Done" : "Open" });
+      state.tasks = await listTasks();
+      state.activity = await listActivity();
+    }, target.checked ? t("tasks.completedToast") : t("tasks.reopenedToast"));
+    return;
+  }
+
   if (target.dataset.triageCategoryFilter !== undefined) {
     state.triageCategoryFilter = target.value;
     render();
@@ -1616,6 +1698,7 @@ document.addEventListener("change", async (event) => {
     await runAction(`category-${id}`, async () => {
       await updateEmailCategory(id, target.value);
       await refreshEmails(id);
+      state.tasks = await listTasks();
     }, "Category updated locally.");
   }
 
