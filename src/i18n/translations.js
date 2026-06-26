@@ -18,6 +18,8 @@ const translations = {
       triageSmall: "Inbox",
       tasks: "Tasks",
       tasksSmall: "Priority",
+      compose: "Compose",
+      composeSmall: "Local draft",
       drafts: "Drafts",
       draftsSmall: "Approval",
       rules: "Rules",
@@ -32,6 +34,7 @@ const translations = {
       import: ["Setup preview", "Preview how a future Microsoft 365 connection could import mailbox structure and workflow patterns."],
       triage: ["Inbox triage", "Review AI-classified messages before any action is taken."],
       tasks: ["Action Center", "Turn important local inbox items into a priority work list."],
+      compose: ["Compose", "Create a fake/local message draft without sending anything."],
       rules: ["Rules", "Approve or adjust local rule previews. They do not affect a real mailbox."],
       drafts: ["Drafts", "Review prepared replies and mark them ready for a person to send."],
       admin: ["Admin", "Manage local workspace preferences and preview future integration safeguards."]
@@ -92,6 +95,30 @@ const translations = {
       highCaption: "Review these first",
       completed: "Completed",
       completedCaption: "Checked off in this browser"
+    },
+    compose: {
+      title: "Compose message",
+      subtitle: "Fake/local only",
+      safetyNote: "This composer does not connect to Gmail, Outlook, or any real mailbox. Saving creates a local draft only.",
+      newMessage: "New message",
+      to: "To",
+      cc: "Cc",
+      subject: "Subject",
+      body: "Message body",
+      attachments: "Attachments",
+      attachmentNote: "Attachments are metadata only in this demo. File contents are not uploaded or stored.",
+      attachmentMetadata: "Attachment metadata",
+      noAttachments: "No attachments selected.",
+      saveDraft: "Save local draft",
+      saving: "Saving...",
+      printPdf: "Print / save as PDF",
+      neverSends: "Never sends email",
+      savedDrafts: "Saved compose drafts",
+      localOnly: "Local only",
+      openDraft: "Open draft",
+      emptyDrafts: "No compose drafts yet.",
+      savedToast: "Compose draft saved locally. Nothing was sent.",
+      printToast: "Use your browser print dialog to save as PDF. Nothing is sent."
     }
   },
   fr: {
@@ -113,6 +140,8 @@ const translations = {
       triageSmall: "Boîte de réception",
       tasks: "Tâches",
       tasksSmall: "Priorité",
+      compose: "Composer",
+      composeSmall: "Brouillon local",
       drafts: "Brouillons",
       draftsSmall: "Approbation",
       rules: "Règles",
@@ -127,6 +156,7 @@ const translations = {
       import: ["Aperçu configuration", "Aperçu de la façon dont une future connexion Microsoft 365 pourrait importer la structure de boîte courriel et les habitudes de travail."],
       triage: ["Tri de la boîte courriel", "Révisez les messages classés par l'IA avant toute action."],
       tasks: ["Centre d'action", "Transformez les courriels locaux importants en liste de travail priorisée."],
+      compose: ["Composer", "Créez un faux brouillon local sans rien envoyer."],
       rules: ["Règles", "Approuvez ou ajustez les aperçus de règles locales. Elles ne touchent aucune vraie boîte courriel."],
       drafts: ["Brouillons", "Révisez les réponses préparées et marquez-les prêtes pour un envoi humain."],
       admin: ["Admin", "Gérez les préférences locales de l'espace de travail et les protections des futures intégrations."]
@@ -187,6 +217,30 @@ const translations = {
       highCaption: "À réviser en premier",
       completed: "Terminées",
       completedCaption: "Cochées dans ce navigateur"
+    },
+    compose: {
+      title: "Composer un message",
+      subtitle: "Faux/local seulement",
+      safetyNote: "Ce compositeur ne se connecte pas à Gmail, Outlook ni à une vraie boîte courriel. L'enregistrement crée seulement un brouillon local.",
+      newMessage: "Nouveau message",
+      to: "À",
+      cc: "Cc",
+      subject: "Objet",
+      body: "Corps du message",
+      attachments: "Pièces jointes",
+      attachmentNote: "Les pièces jointes sont seulement des métadonnées dans cette démo. Le contenu des fichiers n'est pas téléversé ni stocké.",
+      attachmentMetadata: "Métadonnées des pièces jointes",
+      noAttachments: "Aucune pièce jointe sélectionnée.",
+      saveDraft: "Enregistrer le brouillon local",
+      saving: "Enregistrement...",
+      printPdf: "Imprimer / enregistrer en PDF",
+      neverSends: "N'envoie jamais de courriel",
+      savedDrafts: "Brouillons composés enregistrés",
+      localOnly: "Local seulement",
+      openDraft: "Ouvrir le brouillon",
+      emptyDrafts: "Aucun brouillon composé pour l'instant.",
+      savedToast: "Brouillon composé enregistré localement. Rien n'a été envoyé.",
+      printToast: "Utilisez la fenêtre d'impression du navigateur pour enregistrer en PDF. Rien n'est envoyé."
     }
   }
 };

@@ -121,6 +121,7 @@ const defaultState = {
   rules: structuredClone(mockRules),
   drafts: [],
   tasks: [],
+  composeDrafts: [],
   settings: {
     productName: "Courio",
     mode: "Simple",
@@ -222,6 +223,7 @@ function migrateState(parsed) {
     ),
     drafts,
     tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(normalizeTask) : [],
+    composeDrafts: Array.isArray(parsed.composeDrafts) ? parsed.composeDrafts.map(normalizeComposeDraft) : [],
     settings: {
       ...defaultState.settings,
       ...(parsed.settings || {})
@@ -332,6 +334,36 @@ function normalizeTask(task) {
     updatedAt: task.updatedAt || task.createdAt || new Date().toISOString(),
     completedAt: task.completedAt || null
   };
+}
+
+function normalizeComposeDraft(draft) {
+  return {
+    id: draft.id || `compose-${Date.now()}`,
+    to: draft.to?.trim() || "",
+    cc: draft.cc?.trim() || "",
+    subject: draft.subject?.trim() || "",
+    body: draft.body?.trim() || "",
+    attachments: Array.isArray(draft.attachments)
+      ? draft.attachments.map((attachment) => ({
+        id: attachment.id || `attachment-${Date.now()}`,
+        name: attachment.name || "Local attachment",
+        type: attachment.type || "Unknown",
+        size: Number(attachment.size) || 0
+      }))
+      : [],
+    status: "Draft",
+    createdAt: draft.createdAt || new Date().toISOString(),
+    updatedAt: draft.updatedAt || draft.createdAt || new Date().toISOString()
+  };
+}
+
+function validateComposeDraft(draft) {
+  const normalized = normalizeComposeDraft(draft);
+  if (!normalized.to) throw new Error("Recipient is required.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized.to)) throw new Error("Enter a valid recipient email.");
+  if (!normalized.subject) throw new Error("Subject is required.");
+  if (!normalized.body) throw new Error("Message body is required.");
+  return normalized;
 }
 
 function mergeById(defaultItems, savedItems = []) {
@@ -947,6 +979,37 @@ export async function generateMorningDigest() {
 export async function listDrafts() {
   await delay(400);
   return clone(state.drafts.map(buildDraftView));
+}
+
+export async function listComposeDrafts() {
+  await delay(350);
+  return clone([...state.composeDrafts].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+}
+
+export async function saveComposeDraft(draft) {
+  await delay(500);
+  const normalized = validateComposeDraft(draft);
+  const existingIndex = state.composeDrafts.findIndex((item) => item.id === normalized.id);
+  const now = new Date().toISOString();
+  const saved = {
+    ...normalized,
+    id: existingIndex === -1 ? `compose-${Date.now()}` : normalized.id,
+    createdAt: existingIndex === -1 ? now : state.composeDrafts[existingIndex].createdAt,
+    updatedAt: now
+  };
+
+  if (existingIndex === -1) {
+    state.composeDrafts.unshift(saved);
+  } else {
+    state.composeDrafts[existingIndex] = saved;
+  }
+
+  recordActivity("compose-draft-saved", {
+    draftId: saved.id,
+    label: `Compose draft saved: ${saved.subject}`
+  });
+  persistState();
+  return clone(saved);
 }
 
 export async function getDraftDetail(id) {

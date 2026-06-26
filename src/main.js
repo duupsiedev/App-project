@@ -27,9 +27,11 @@ import {
   listEmails,
   listRules,
   listTasks,
+  listComposeDrafts,
   resetDemoData,
   saveSettings,
   saveDraft,
+  saveComposeDraft,
   sendAssistantCommand,
   summarizeThread,
   toggleCategoryActive,
@@ -42,7 +44,7 @@ import {
 } from "./api/mockApi.js";
 
 const app = document.querySelector("#app");
-const VALID_TABS = new Set(["dashboard", "import", "triage", "tasks", "rules", "drafts", "admin"]);
+const VALID_TABS = new Set(["dashboard", "import", "triage", "tasks", "compose", "rules", "drafts", "admin"]);
 
 const state = {
   tab: "dashboard",
@@ -52,6 +54,7 @@ const state = {
   rules: [],
   drafts: [],
   tasks: [],
+  composeDrafts: [],
   settings: {
     companyName: "Demo PME Inc.",
     language: "en",
@@ -85,6 +88,14 @@ const state = {
   activity: [],
   setupPreview: null,
   selectedSetupMailboxId: "",
+  composeForm: {
+    id: "new",
+    to: "",
+    cc: "",
+    subject: "",
+    body: "",
+    attachments: []
+  },
   summary: "",
   showExplanation: false
 };
@@ -105,6 +116,7 @@ app.innerHTML = `
           <div class="nav-label" data-copy="nav.groups.work">Work</div>
           <button data-tab="triage"><span data-copy="nav.triage">Triage</span> <small data-copy="nav.triageSmall">Inbox</small></button>
           <button data-tab="tasks"><span data-copy="nav.tasks">Tasks</span> <small data-copy="nav.tasksSmall">Priority</small></button>
+          <button data-tab="compose"><span data-copy="nav.compose">Compose</span> <small data-copy="nav.composeSmall">Local draft</small></button>
           <button data-tab="drafts"><span data-copy="nav.drafts">Drafts</span> <small data-copy="nav.draftsSmall">Approval</small></button>
         </div>
         <div class="nav-group">
@@ -131,6 +143,7 @@ app.innerHTML = `
       <section id="import" class="section"></section>
       <section id="triage" class="section"></section>
       <section id="tasks" class="section"></section>
+      <section id="compose" class="section"></section>
       <section id="rules" class="section"></section>
       <section id="drafts" class="section"></section>
       <section id="admin" class="section"></section>
@@ -278,6 +291,23 @@ function getTriageFilteredEmails() {
   });
 }
 
+function emptyComposeForm() {
+  return {
+    id: "new",
+    to: "",
+    cc: "",
+    subject: "",
+    body: "",
+    attachments: []
+  };
+}
+
+function formatFileSize(size = 0) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function lowRiskBulkApprovalEnabled() {
   return state.settings.allowLowRiskBulkApproval !== "No";
 }
@@ -307,13 +337,14 @@ function renderShellCopy() {
 
 async function loadInitialData() {
   try {
-    const [emails, categories, employees, rules, drafts, tasks, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listEmails(), listCategories(), listEmployees(), listRules(), listDrafts(), listTasks(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
+    const [emails, categories, employees, rules, drafts, tasks, composeDrafts, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listEmails(), listCategories(), listEmployees(), listRules(), listDrafts(), listTasks(), listComposeDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
     state.emails = emails;
     state.categories = categories;
     state.employees = employees;
     state.rules = rules;
     state.drafts = drafts;
     state.tasks = tasks;
+    state.composeDrafts = composeDrafts;
     state.settings = { ...state.settings, ...settings };
     state.settingsForm = null;
     state.digest = digest;
@@ -347,6 +378,7 @@ function render() {
   renderImport();
   renderTriage();
   renderTasks();
+  renderCompose();
   renderRules();
   renderDrafts();
   renderAdmin();
@@ -603,6 +635,63 @@ function renderTasks() {
     <div class="panel" style="margin-top:16px">
       <div class="panel-title"><h2>${t("tasks.title")}</h2><span>${t("tasks.subtitle")}</span></div>
       ${content}
+    </div>
+  `;
+}
+
+function renderCompose() {
+  const form = state.composeForm || emptyComposeForm();
+  const attachmentList = form.attachments.length
+    ? `<ul>${form.attachments.map((attachment) => `<li>${escapeHtml(attachment.name)} <small>${escapeHtml(attachment.type || "Unknown")} - ${formatFileSize(attachment.size)}</small></li>`).join("")}</ul>`
+    : `<div class="empty-state">${t("compose.noAttachments")}</div>`;
+  const savedDrafts = state.composeDrafts.length
+    ? `<table class="table">
+        <thead><tr><th>${t("compose.subject")}</th><th>${t("compose.to")}</th><th>${t("compose.attachments")}</th><th></th></tr></thead>
+        <tbody>
+          ${state.composeDrafts.map((draft) => `
+            <tr>
+              <td>${escapeHtml(draft.subject)}<br><small>${escapeHtml(new Date(draft.updatedAt).toLocaleString())}</small></td>
+              <td>${escapeHtml(draft.to)}</td>
+              <td>${draft.attachments.length}</td>
+              <td><button class="btn subtle" data-open-compose-draft="${draft.id}">${t("compose.openDraft")}</button></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>`
+    : `<div class="empty-state">${t("compose.emptyDrafts")}</div>`;
+
+  document.querySelector("#compose").innerHTML = `
+    <div class="grid cols-2">
+      <div class="panel">
+        <div class="panel-title">
+          <div><h2>${t("compose.title")}</h2><span>${t("compose.subtitle")}</span></div>
+          <button class="btn subtle" data-new-compose>${t("compose.newMessage")}</button>
+        </div>
+        <div class="preview">${t("compose.safetyNote")}</div>
+        <div class="form-grid" style="margin-top:14px">
+          <label>${t("compose.to")}<input data-compose-field="to" type="email" value="${escapeHtml(form.to)}" placeholder="client@example.ca"></label>
+          <label>${t("compose.cc")}<input data-compose-field="cc" value="${escapeHtml(form.cc)}" placeholder="optional@example.ca"></label>
+          <label>${t("compose.subject")}<input data-compose-field="subject" value="${escapeHtml(form.subject)}"></label>
+          <label>${t("compose.body")}<textarea data-compose-field="body">${escapeHtml(form.body)}</textarea></label>
+          <label>${t("compose.attachments")}
+            <input data-compose-attachments type="file" multiple>
+          </label>
+          <div class="preview">${t("compose.attachmentNote")}</div>
+        </div>
+        <div class="drawer-section">
+          <h3>${t("compose.attachmentMetadata")}</h3>
+          ${attachmentList}
+        </div>
+        <div class="actions">
+          <button class="btn primary" data-save-compose ${isBusy("save-compose") ? "disabled" : ""}>${isBusy("save-compose") ? t("compose.saving") : t("compose.saveDraft")}</button>
+          <button class="btn subtle" data-print-compose>${t("compose.printPdf")}</button>
+          <span class="mode">${t("compose.neverSends")}</span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><h2>${t("compose.savedDrafts")}</h2><span>${t("compose.localOnly")}</span></div>
+        ${savedDrafts}
+      </div>
     </div>
   `;
 }
@@ -1312,6 +1401,37 @@ document.addEventListener("click", async (event) => {
     navigateTo(target.dataset.tabTarget);
   }
 
+  if (target.dataset.newCompose !== undefined) {
+    state.composeForm = emptyComposeForm();
+    render();
+    return;
+  }
+
+  if (target.dataset.openComposeDraft) {
+    const draft = state.composeDrafts.find((item) => item.id === target.dataset.openComposeDraft);
+    if (draft) {
+      state.composeForm = { ...draft, attachments: [...draft.attachments] };
+      navigateTo("compose", { closeDrawers: false });
+    }
+    return;
+  }
+
+  if (target.dataset.saveCompose !== undefined) {
+    await runAction("save-compose", async () => {
+      const saved = await saveComposeDraft(state.composeForm);
+      state.composeForm = { ...saved, attachments: [...saved.attachments] };
+      state.composeDrafts = await listComposeDrafts();
+      state.activity = await listActivity();
+    }, t("compose.savedToast"));
+    return;
+  }
+
+  if (target.dataset.printCompose !== undefined) {
+    toast(t("compose.printToast"));
+    window.print();
+    return;
+  }
+
   if (target.dataset.setupMailbox) {
     state.selectedSetupMailboxId = target.dataset.setupMailbox;
     renderImport();
@@ -1687,6 +1807,21 @@ document.addEventListener("change", async (event) => {
     return;
   }
 
+  if (target.dataset.composeAttachments !== undefined) {
+    state.composeForm = {
+      ...emptyComposeForm(),
+      ...state.composeForm,
+      attachments: [...target.files].map((file, index) => ({
+        id: `local-${Date.now()}-${index}`,
+        name: file.name,
+        type: file.type || "Unknown",
+        size: file.size
+      }))
+    };
+    renderCompose();
+    return;
+  }
+
   if (target.dataset.triageCategoryFilter !== undefined) {
     state.triageCategoryFilter = target.value;
     render();
@@ -1725,6 +1860,15 @@ document.addEventListener("input", (event) => {
     state.settingsForm = {
       ...getSettingsForm(),
       [target.dataset.setting]: target.value
+    };
+    return;
+  }
+
+  if (target.dataset.composeField !== undefined) {
+    state.composeForm = {
+      ...emptyComposeForm(),
+      ...state.composeForm,
+      [target.dataset.composeField]: target.value
     };
     return;
   }
