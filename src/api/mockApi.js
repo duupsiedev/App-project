@@ -156,6 +156,8 @@ function createDefaultEmail(email) {
 
   return {
     ...emailData,
+    archivedAt: emailData.archivedAt || null,
+    archiveReason: emailData.archiveReason || "",
     workflowState: WORKFLOW_STATE.NEEDS_REVIEW
   };
 }
@@ -193,6 +195,8 @@ function migrateState(parsed) {
 
     return {
       ...emailData,
+      archivedAt: emailData.archivedAt || null,
+      archiveReason: emailData.archiveReason || "",
       workflowState
     };
   });
@@ -456,6 +460,7 @@ function buildEmailView(email) {
 
   return {
     ...email,
+    archived: Boolean(email.archivedAt),
     reviewed: isReviewed,
     status: isDone ? "Done" : "Open",
     workflowStatus: workflowLabel(email.workflowState),
@@ -470,6 +475,8 @@ function buildEmailView(email) {
     draftActionLabel: isDone ? "View approved draft" : draftStarted ? "Edit draft" : "Generate draft",
     canGenerateDraft: email.workflowState === WORKFLOW_STATE.READY_FOR_DRAFT && !draftStarted,
     canOpenDraft: draftStarted,
+    canArchive: !draftStarted || isDone,
+    archiveBlocker: draftStarted && !isDone ? "Finish the active draft before removing this email from the demo inbox." : "",
     completionBlocker: !isReviewed
       ? "Review this email before generating a draft."
       : isDone
@@ -520,6 +527,10 @@ function findDraft(id) {
 
 function findDraftByEmailId(emailId) {
   return state.drafts.find((item) => (item.emailId || item.id) === emailId);
+}
+
+function visibleEmails() {
+  return state.emails.filter((email) => !email.archivedAt);
 }
 
 function findEmployee(id) {
@@ -617,7 +628,7 @@ function normalizeEmployeeInput(employee, existingId = null) {
 }
 
 function buildDigest() {
-  const openEmails = state.emails.filter((email) => !emailIsComplete(email));
+  const openEmails = visibleEmails().filter((email) => !emailIsComplete(email));
   const draftViews = state.drafts.map(buildDraftView);
   const readyDrafts = draftViews.filter((draft) => draft.isReadyForHumanSend).length;
   const waitingDrafts = draftViews.filter((draft) => draft.canSelectForBulkApproval).length;
@@ -729,9 +740,10 @@ function assistantMessageMatches(message, aliases) {
 
 function answerAssistantCommand(rawMessage, context = {}) {
   const message = normalizeAssistantMessage(rawMessage);
-  const urgentCount = state.emails.filter((email) => !emailIsComplete(email) && email.urgency === "High").length;
+  const inboxEmails = visibleEmails();
+  const urgentCount = inboxEmails.filter((email) => !emailIsComplete(email) && email.urgency === "High").length;
   const invoiceCategory = categoryName("cat-accounting", "Accounting");
-  const invoiceCount = state.emails.filter((email) => !emailIsComplete(email) && email.category === invoiceCategory).length;
+  const invoiceCount = inboxEmails.filter((email) => !emailIsComplete(email) && email.category === invoiceCategory).length;
   const waitingDrafts = state.drafts
     .map(buildDraftView)
     .filter((draft) => draft.canSelectForBulkApproval)
@@ -809,7 +821,7 @@ function answerAssistantCommand(rawMessage, context = {}) {
 
 export async function listEmails() {
   await delay();
-  return clone(state.emails.map(buildEmailView));
+  return clone(visibleEmails().map(buildEmailView));
 }
 
 export async function listEmployees() {
@@ -1103,6 +1115,33 @@ export async function updateEmailCategory(id, category) {
   email.category = category;
   persistState();
   return clone(email);
+}
+
+export async function archiveEmails(ids, reason = "Removed from demo inbox") {
+  await delay(500);
+  const uniqueIds = [...new Set((ids || []).filter(Boolean))];
+  if (!uniqueIds.length) throw new Error("Choose at least one email to remove from the demo inbox.");
+
+  const archivedAt = new Date().toISOString();
+  const archived = uniqueIds.map((id) => {
+    const email = findEmail(id);
+    const draft = findDraftByEmailId(email.id);
+    const isDone = emailIsComplete(email);
+    if (draft && !isDone) {
+      throw new Error("Finish active drafts before removing those emails from the demo inbox.");
+    }
+
+    email.archivedAt = archivedAt;
+    email.archiveReason = reason;
+    return email;
+  });
+
+  recordActivity("emails-archived", {
+    emailIds: archived.map((email) => email.id),
+    label: `${archived.length} email${archived.length === 1 ? "" : "s"} removed from the demo inbox`
+  });
+  persistState();
+  return clone(archived.map(buildEmailView));
 }
 
 export async function createCategory(category) {

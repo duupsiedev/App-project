@@ -118,5 +118,25 @@ export const mockEmails = [
     ],
     summary: "Client wants to reschedule tomorrow's appointment to next Tuesday afternoon.",
     draft: "Hi, thanks for letting us know. Next Tuesday afternoon should work on our side. Could you confirm your preferred time window?"
+  },
+  {
+    id: "email-7",
+    subject: "Weekly partner newsletter",
+    sender: "Service Ledger Weekly",
+    senderEmail: "updates@serviceledger.example",
+    body: "This week's roundup includes product tips, partner webinars, and a checklist for organizing client documents before month end.",
+    category: "Newsletter",
+    urgency: "Low",
+    confidence: 79,
+    suggestedAction: "Remove from demo inbox",
+    requiresDraft: true,
+    assignedTo: "",
+    explanation: "Courio categorized this as a newsletter because it is a broadcast update with no client request, deadline, or required reply.",
+    thread: [
+      "Marketing-style newsletter with no direct client request.",
+      "Low-priority inbox noise that can be removed from the demo inbox after review."
+    ],
+    summary: "Newsletter-style update. No reply appears needed.",
+    draft: "No reply needed. This local demo item can be removed from the inbox after review."
   }
 ];

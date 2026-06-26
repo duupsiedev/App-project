@@ -48,6 +48,24 @@ const translations = {
       prototypeBehavior: "Prototype behavior",
       savedLanguage: "Saved language",
       languageNote: "Language changes apply after saving. Internal workflow values stay stable."
+    },
+    triage: {
+      inboxControl: "Inbox control",
+      categoryFilter: "Category filter",
+      allCategories: "All categories",
+      emptyUrgent: "No urgent emails. You are caught up on high-priority work.",
+      emptyInvoices: "No invoice emails are waiting for review.",
+      emptyCategory: "No emails match this category filter.",
+      emptyAll: "No emails are available in this local demo.",
+      remove: "Remove",
+      removing: "Removing...",
+      removeFiltered: "Remove filtered",
+      removeFilteredDisabled: "No removable emails in the current view.",
+      removeConfirmTitle: "Remove this email from the demo inbox?",
+      removeConfirmMessage: "This only hides the fake/local demo email. Nothing is deleted from a real mailbox:",
+      removeFilteredConfirmTitle: "Remove filtered emails from the demo inbox?",
+      removeFilteredConfirmMessage: "This only hides fake/local demo emails. Number selected:",
+      removeSuccess: "Email removed from the demo inbox locally."
     }
   },
   fr: {
@@ -99,6 +117,24 @@ const translations = {
       prototypeBehavior: "Comportement du prototype",
       savedLanguage: "Langue enregistrée",
       languageNote: "Les changements de langue s'appliquent après l'enregistrement. Les valeurs internes du flux restent stables."
+    },
+    triage: {
+      inboxControl: "Contrôle de la boîte",
+      categoryFilter: "Filtre de catégorie",
+      allCategories: "Toutes les catégories",
+      emptyUrgent: "Aucun courriel urgent. Les priorités élevées sont à jour.",
+      emptyInvoices: "Aucun courriel de facture n'attend une révision.",
+      emptyCategory: "Aucun courriel ne correspond à cette catégorie.",
+      emptyAll: "Aucun courriel n'est disponible dans cette démo locale.",
+      remove: "Retirer",
+      removing: "Retrait...",
+      removeFiltered: "Retirer la sélection",
+      removeFilteredDisabled: "Aucun courriel retirable dans la vue actuelle.",
+      removeConfirmTitle: "Retirer ce courriel de la boîte de démo?",
+      removeConfirmMessage: "Cela cache seulement le faux courriel local. Rien n'est supprimé d'une vraie boîte:",
+      removeFilteredConfirmTitle: "Retirer les courriels filtrés de la boîte de démo?",
+      removeFilteredConfirmMessage: "Cela cache seulement des faux courriels locaux. Nombre sélectionné:",
+      removeSuccess: "Courriel retiré localement de la boîte de démo."
     }
   }
 };

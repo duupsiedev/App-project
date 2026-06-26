@@ -6,6 +6,7 @@ import {
   approveDraft,
   approveDrafts,
   approveLowRiskDrafts,
+  archiveEmails,
   assignEmail,
   createCategory,
   createEmployee,
@@ -73,6 +74,7 @@ const state = {
   confirmDialog: null,
   digest: null,
   triageFilter: "all",
+  triageCategoryFilter: "all",
   draftFilter: "all",
   ruleQuery: "",
   assistantOpen: false,
@@ -242,6 +244,33 @@ function activeCategoriesFor(currentName = "") {
 
 function categoryNameById(id, fallback) {
   return state.categories.find((category) => category.id === id)?.name || fallback;
+}
+
+function triageCategoryOptions() {
+  const byName = new Map();
+  state.categories.forEach((category) => {
+    if (category.active) byName.set(category.name, category);
+  });
+  state.emails.forEach((email) => {
+    if (!byName.has(email.category)) {
+      byName.set(email.category, {
+        id: `current-${email.category}`,
+        name: email.category,
+        active: true
+      });
+    }
+  });
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getTriageFilteredEmails() {
+  const accountingCategory = categoryNameById("cat-accounting", "Accounting");
+  return state.emails.filter((email) => {
+    if (state.triageCategoryFilter !== "all" && email.category !== state.triageCategoryFilter) return false;
+    if (state.triageFilter === "urgent") return email.status !== "Done" && email.urgency === "High";
+    if (state.triageFilter === "invoices") return email.status !== "Done" && email.category === accountingCategory;
+    return true;
+  });
 }
 
 function lowRiskBulkApprovalEnabled() {
@@ -461,16 +490,14 @@ function renderImport() {
 
 function renderTriage() {
   const employeeById = Object.fromEntries(state.employees.map((employee) => [employee.id, employee]));
-  const accountingCategory = categoryNameById("cat-accounting", "Accounting");
-  const filteredEmails = state.emails.filter((email) => {
-    if (state.triageFilter === "urgent") return email.status !== "Done" && email.urgency === "High";
-    if (state.triageFilter === "invoices") return email.status !== "Done" && email.category === accountingCategory;
-    return true;
-  });
+  const categoryOptions = triageCategoryOptions();
+  const filteredEmails = getTriageFilteredEmails();
+  const removableEmails = filteredEmails.filter((email) => email.canArchive);
+  const selectedCategoryLabel = state.triageCategoryFilter === "all" ? t("triage.allCategories") : state.triageCategoryFilter;
   const table = state.loading.emails
     ? `<div class="loading">Loading mock inbox...</div>`
     : filteredEmails.length === 0
-      ? `<div class="empty-state">${state.triageFilter === "urgent" ? "No urgent emails. You are caught up on high-priority work." : state.triageFilter === "invoices" ? "No invoice emails are waiting for review." : "No emails are available in this local demo."}</div>`
+      ? `<div class="empty-state">${state.triageFilter === "urgent" ? t("triage.emptyUrgent") : state.triageFilter === "invoices" ? t("triage.emptyInvoices") : state.triageCategoryFilter !== "all" ? t("triage.emptyCategory") : t("triage.emptyAll")}</div>`
     : `<table class="table">
         <thead><tr><th>Subject</th><th>Sender</th><th>Category</th><th>Assigned</th><th>Workflow</th><th>Status</th><th></th></tr></thead>
         <tbody>
@@ -488,6 +515,7 @@ function renderTriage() {
               <td><span class="badge ${email.status === "Done" ? "done" : ""}">${escapeHtml(email.status)}</span></td>
               <td class="actions">
                 <button class="btn subtle" data-review-email="${email.id}" ${isBusy(`review-${email.id}`) ? "disabled" : ""}>${isBusy(`review-${email.id}`) ? "Opening..." : "Review"}</button>
+                <button class="btn subtle" data-archive-email="${email.id}" ${!email.canArchive || isBusy(`archive-${email.id}`) ? `disabled title="${escapeHtml(email.archiveBlocker || "Remove this fake/local email from the demo inbox.")}"` : ""}>${isBusy(`archive-${email.id}`) ? t("triage.removing") : t("triage.remove")}</button>
                 ${email.status === "Done"
                   ? `<span class="status-text">Complete</span>`
                   : `<span class="status-text" title="Generate, review, save, and approve a draft to complete this workflow.">Draft required</span>`}
@@ -499,13 +527,21 @@ function renderTriage() {
 
   document.querySelector("#triage").innerHTML = `
     <div class="panel">
-      <div class="panel-title"><h2>Inbox triage</h2><span>Suggested actions only</span></div>
+      <div class="panel-title"><h2>Inbox triage</h2><span>${t("triage.inboxControl")}</span></div>
       <div class="segmented" style="margin-bottom:14px">
         ${[
           ["all", "All inbox"],
           ["urgent", "Urgent"],
           ["invoices", "Invoices"]
         ].map(([value, label]) => `<button class="${state.triageFilter === value ? "active" : ""}" data-triage-filter="${value}">${label}</button>`).join("")}
+      </div>
+      <div class="list-toolbar" style="margin-bottom:14px">
+        <select data-triage-category-filter aria-label="${t("triage.categoryFilter")}">
+          <option value="all" ${state.triageCategoryFilter === "all" ? "selected" : ""}>${t("triage.allCategories")}</option>
+          ${categoryOptions.map((category) => `<option value="${escapeHtml(category.name)}" ${state.triageCategoryFilter === category.name ? "selected" : ""}>${escapeHtml(category.name)}</option>`).join("")}
+        </select>
+        <button class="btn subtle" data-archive-filtered ${filteredEmails.length === 0 || removableEmails.length === 0 || isBusy("archive-filtered") ? `disabled title="${t("triage.removeFilteredDisabled")}"` : ""}>${isBusy("archive-filtered") ? t("triage.removing") : `${t("triage.removeFiltered")} (${removableEmails.length})`}</button>
+        <span class="mode">${escapeHtml(selectedCategoryLabel)}</span>
       </div>
       ${table}
     </div>
@@ -612,6 +648,7 @@ function renderDrawer() {
       <div class="drawer-actions">
         <button class="btn primary" data-summary-email="${email.id}" ${isBusy(`summary-${email.id}`) ? "disabled" : ""}>${isBusy(`summary-${email.id}`) ? "Summarizing..." : "Summarize"}</button>
         ${email.canOpenDraft ? `<button class="btn subtle" data-open-email-draft="${email.id}" ${isBusy(`open-email-draft-${email.id}`) ? "disabled" : ""}>${email.draftActionLabel}</button>` : `<button class="btn subtle" data-generate-draft="${email.id}" ${!email.canGenerateDraft || isBusy(`draft-${email.id}`) ? `disabled title="${email.completionBlocker || "Draft action is unavailable."}"` : ""}>${isBusy(`draft-${email.id}`) ? "Drafting..." : email.draftActionLabel}</button>`}
+        <button class="btn subtle" data-archive-email="${email.id}" ${!email.canArchive || isBusy(`archive-${email.id}`) ? `disabled title="${escapeHtml(email.archiveBlocker || "Remove this fake/local email from the demo inbox.")}"` : ""}>${isBusy(`archive-${email.id}`) ? t("triage.removing") : t("triage.remove")}</button>
         ${emailDone
           ? `<span class="status-text">Workflow complete</span>`
           : `<span class="status-text">Approving the draft completes this workflow.</span>`}
@@ -1194,6 +1231,17 @@ document.addEventListener("click", async (event) => {
       }, "Employee removed and assigned emails returned to Unassigned.");
       return;
     }
+
+    if (dialog?.type === "archive-emails") {
+      await runAction("archive-emails", async () => {
+        await archiveEmails(dialog.emailIds, dialog.reason);
+        state.emails = await listEmails();
+        state.digest = await generateMorningDigest();
+        state.activity = await listActivity();
+        state.selectedEmail = null;
+      }, t("triage.removeSuccess"));
+      return;
+    }
   }
 
   if (target.dataset.tab) {
@@ -1212,6 +1260,38 @@ document.addEventListener("click", async (event) => {
   if (target.dataset.triageFilter) {
     state.triageFilter = target.dataset.triageFilter;
     render();
+  }
+
+  if (target.dataset.archiveEmail) {
+    const email = state.emails.find((item) => item.id === target.dataset.archiveEmail);
+    if (!email) return;
+    state.confirmDialog = {
+      type: "archive-emails",
+      emailIds: [email.id],
+      reason: "Removed from demo inbox",
+      title: t("triage.removeConfirmTitle"),
+      message: `${t("triage.removeConfirmMessage")} "${email.subject}"`,
+      primaryLabel: t("triage.remove"),
+      tone: "danger"
+    };
+    render();
+    return;
+  }
+
+  if (target.dataset.archiveFiltered !== undefined) {
+    const removableEmails = getTriageFilteredEmails().filter((email) => email.canArchive);
+    if (!removableEmails.length) return;
+    state.confirmDialog = {
+      type: "archive-emails",
+      emailIds: removableEmails.map((email) => email.id),
+      reason: "Bulk removed from demo inbox",
+      title: t("triage.removeFilteredConfirmTitle"),
+      message: `${t("triage.removeFilteredConfirmMessage")} ${removableEmails.length}`,
+      primaryLabel: t("triage.removeFiltered"),
+      tone: "danger"
+    };
+    render();
+    return;
   }
 
   if (target.dataset.draftFilter) {
@@ -1522,6 +1602,12 @@ document.addEventListener("change", async (event) => {
       [target.dataset.setting]: target.value
     };
     if (target.dataset.setting === "mode") render();
+    return;
+  }
+
+  if (target.dataset.triageCategoryFilter !== undefined) {
+    state.triageCategoryFilter = target.value;
+    render();
     return;
   }
 
