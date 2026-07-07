@@ -17,11 +17,13 @@ import {
   getDraftDetail,
   getDraftForEmail,
   getSettings,
+  getDemoSession,
   getEmailThread,
   getSetupImportPreview,
   listActivity,
   listAssistantMessages,
   listCategories,
+  listDemoAccounts,
   listEmployees,
   listDrafts,
   listEmails,
@@ -33,6 +35,7 @@ import {
   saveDraft,
   saveComposeDraft,
   sendAssistantCommand,
+  setDemoSession,
   summarizeThread,
   toggleCategoryActive,
   toggleRule,
@@ -40,7 +43,8 @@ import {
   updateEmployee,
   updateRule,
   updateEmailCategory,
-  updateTask
+  updateTask,
+  logoutDemoSession
 } from "./api/mockApi.js";
 
 const app = document.querySelector("#app");
@@ -48,6 +52,8 @@ const VALID_TABS = new Set(["dashboard", "import", "triage", "tasks", "compose",
 
 const state = {
   tab: "dashboard",
+  demoAccounts: [],
+  session: null,
   emails: [],
   categories: [],
   employees: [],
@@ -81,6 +87,7 @@ const state = {
   digest: null,
   triageFilter: "all",
   triageCategoryFilter: "all",
+  taskAssigneeFilter: "all",
   draftFilter: "all",
   ruleQuery: "",
   assistantOpen: false,
@@ -152,6 +159,7 @@ app.innerHTML = `
   <div id="drawerRoot"></div>
   <div id="modalRoot"></div>
   <div id="assistantRoot"></div>
+  <div id="authRoot"></div>
   <div class="toast" id="toast"></div>
 `;
 
@@ -185,8 +193,26 @@ function toast(message, isError = false) {
   toastEl.dataset.timer = window.setTimeout(() => toastEl.classList.remove("show"), 2400);
 }
 
+function isAdminSession() {
+  return state.session?.role === "Admin";
+}
+
+function isEmployeeSession() {
+  return state.session?.role === "Employee";
+}
+
+function allowedTabs() {
+  if (!state.session) return new Set([]);
+  if (isEmployeeSession()) return new Set(["triage", "tasks", "compose"]);
+  return VALID_TABS;
+}
+
+function canAccessTab(tab) {
+  return allowedTabs().has(tab);
+}
+
 function navigateTo(tab, options = {}) {
-  if (!VALID_TABS.has(tab)) {
+  if (!VALID_TABS.has(tab) || !canAccessTab(tab)) {
     throw new Error("That Courio section is unavailable.");
   }
 
@@ -224,10 +250,11 @@ async function refreshEmails(keepSelectedId = state.selectedEmail?.id) {
 }
 
 async function refreshCategoryState(keepSelectedId = state.selectedCategory?.id) {
-  const [categories, emails, rules, digest, setupPreview, activity] = await Promise.all([
+  const [categories, emails, rules, tasks, digest, setupPreview, activity] = await Promise.all([
     listCategories(),
     listEmails(),
     listRules(),
+    listTasks(),
     generateMorningDigest(),
     getSetupImportPreview(),
     listActivity()
@@ -236,12 +263,37 @@ async function refreshCategoryState(keepSelectedId = state.selectedCategory?.id)
   state.categories = categories;
   state.emails = emails;
   state.rules = rules;
+  state.tasks = tasks;
   state.digest = digest;
   state.setupPreview = setupPreview;
   state.activity = activity;
   state.selectedCategory = keepSelectedId
     ? categories.find((category) => category.id === keepSelectedId) || null
     : null;
+}
+
+async function refreshWorkspaceForSession() {
+  const [session, emails, tasks, drafts, composeDrafts, digest, activity] = await Promise.all([
+    getDemoSession(),
+    listEmails(),
+    listTasks(),
+    listDrafts(),
+    listComposeDrafts(),
+    generateMorningDigest(),
+    listActivity()
+  ]);
+  state.session = session;
+  state.emails = emails;
+  state.tasks = tasks;
+  state.drafts = drafts;
+  state.composeDrafts = composeDrafts;
+  state.digest = digest;
+  state.activity = activity;
+  state.selectedEmail = null;
+  state.selectedDraft = null;
+  state.selectedRule = null;
+  state.selectedEmployee = null;
+  state.selectedCategory = null;
 }
 
 function isDraftReady(draft) {
@@ -337,7 +389,9 @@ function renderShellCopy() {
 
 async function loadInitialData() {
   try {
-    const [emails, categories, employees, rules, drafts, tasks, composeDrafts, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listEmails(), listCategories(), listEmployees(), listRules(), listDrafts(), listTasks(), listComposeDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
+    const [demoAccounts, session, emails, categories, employees, rules, drafts, tasks, composeDrafts, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listDemoAccounts(), getDemoSession(), listEmails(), listCategories(), listEmployees(), listRules(), listDrafts(), listTasks(), listComposeDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
+    state.demoAccounts = demoAccounts;
+    state.session = session;
     state.emails = emails;
     state.categories = categories;
     state.employees = employees;
@@ -352,6 +406,9 @@ async function loadInitialData() {
     state.activity = activity;
     state.setupPreview = setupPreview;
     state.selectedSetupMailboxId = setupPreview.mailboxes[0]?.id || "";
+    if (state.session && !canAccessTab(state.tab)) {
+      state.tab = isEmployeeSession() ? "tasks" : "dashboard";
+    }
   } catch (error) {
     toast(error.message || "Could not load mock data.", true);
   } finally {
@@ -363,6 +420,9 @@ async function loadInitialData() {
 }
 
 function render() {
+  if (state.session && !canAccessTab(state.tab)) {
+    state.tab = isEmployeeSession() ? "tasks" : "dashboard";
+  }
   const pageCopy = getPageCopy(state.tab, currentLanguage());
   renderShellCopy();
   document.querySelector("#pageTitle").textContent = pageCopy[0];
@@ -371,6 +431,7 @@ function render() {
     section.classList.toggle("active", section.id === state.tab);
   });
   document.querySelectorAll(".nav button").forEach((button) => {
+    button.hidden = !canAccessTab(button.dataset.tab);
     button.classList.toggle("active", button.dataset.tab === state.tab);
   });
 
@@ -385,6 +446,7 @@ function render() {
   renderDrawer();
   renderConfirmModal();
   renderAssistant();
+  renderDemoSession();
 }
 
 function renderDashboard() {
@@ -588,21 +650,35 @@ function renderTriage() {
 }
 
 function renderTasks() {
-  const openCount = state.tasks.filter((task) => task.status !== "Done").length;
-  const highCount = state.tasks.filter((task) => task.status !== "Done" && task.priority === "High").length;
-  const content = state.tasks.length === 0
+  const visibleTasks = state.tasks.filter((task) => {
+    if (!isAdminSession() || state.taskAssigneeFilter === "all") return true;
+    if (state.taskAssigneeFilter === "unassigned") return !task.assignedTo;
+    return task.assignedTo === state.taskAssigneeFilter;
+  });
+  const openCount = visibleTasks.filter((task) => task.status !== "Done").length;
+  const highCount = visibleTasks.filter((task) => task.status !== "Done" && task.priority === "High").length;
+  const content = visibleTasks.length === 0
     ? `<div class="empty-state">${t("tasks.empty")}</div>`
     : `<table class="table">
-        <thead><tr><th>${t("tasks.done")}</th><th>${t("tasks.task")}</th><th>${t("tasks.priority")}</th><th>${t("tasks.source")}</th><th>${t("tasks.notes")}</th><th></th></tr></thead>
+        <thead><tr><th>${t("tasks.done")}</th><th>${t("tasks.task")}</th><th>${t("tasks.priority")}</th><th>${t("tasks.assignedTo")}</th><th>${t("tasks.source")}</th><th>${t("tasks.notes")}</th><th></th></tr></thead>
         <tbody>
-          ${state.tasks.map((task) => `
+          ${visibleTasks.map((task) => `
             <tr>
               <td><input type="checkbox" data-task-status="${task.id}" ${task.status === "Done" ? "checked" : ""}></td>
               <td>
                 <strong>${escapeHtml(task.title)}</strong><br>
                 <small>${escapeHtml(task.description)}</small>
+                ${(task.history || []).length ? `<br><small>${escapeHtml(task.history.at(-1)?.label || "")}</small>` : ""}
               </td>
               <td><span class="badge ${task.priority === "High" ? "urgent" : task.priority === "Low" ? "done" : "pending"}">${escapeHtml(task.priority)}</span><br><small>${escapeHtml(task.category)}</small></td>
+              <td>
+                ${isAdminSession()
+                  ? `<select data-task-assignee="${task.id}">
+                      <option value="" ${!task.assignedTo ? "selected" : ""}>${t("tasks.unassigned")}</option>
+                      ${state.employees.map((employee) => `<option value="${employee.id}" ${task.assignedTo === employee.id ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("")}
+                    </select>`
+                  : escapeHtml(task.assignedEmployee?.name || t("tasks.unassigned"))}
+              </td>
               <td>${escapeHtml(task.sourceEmail?.subject || "Local task")}<br><small>${escapeHtml(task.sourceEmail?.sender || "Demo inbox")}</small></td>
               <td><textarea data-task-note="${task.id}" placeholder="${t("tasks.notePlaceholder")}">${escapeHtml(task.notes || "")}</textarea></td>
               <td class="actions">
@@ -628,12 +704,21 @@ function renderTasks() {
       </div>
       <div class="panel metric">
         <div class="label">${t("tasks.completed")}</div>
-        <div class="value">${state.tasks.filter((task) => task.status === "Done").length}</div>
+        <div class="value">${visibleTasks.filter((task) => task.status === "Done").length}</div>
         <div class="caption">${t("tasks.completedCaption")}</div>
       </div>
     </div>
     <div class="panel" style="margin-top:16px">
       <div class="panel-title"><h2>${t("tasks.title")}</h2><span>${t("tasks.subtitle")}</span></div>
+      ${isAdminSession() ? `
+        <div class="list-toolbar" style="margin-bottom:14px">
+          <select data-task-assignee-filter aria-label="${t("tasks.assigneeFilter")}">
+            <option value="all" ${state.taskAssigneeFilter === "all" ? "selected" : ""}>${t("tasks.allAssignees")}</option>
+            <option value="unassigned" ${state.taskAssigneeFilter === "unassigned" ? "selected" : ""}>${t("tasks.unassigned")}</option>
+            ${state.employees.map((employee) => `<option value="${employee.id}" ${state.taskAssigneeFilter === employee.id ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("")}
+          </select>
+        </div>
+      ` : `<div class="preview" style="margin-bottom:14px">${t("tasks.employeeScope")}</div>`}
       ${content}
     </div>
   `;
@@ -751,12 +836,14 @@ function renderDrawer() {
             ${categories.map((category) => `<option value="${escapeHtml(category.name)}" ${category.name === email.category ? "selected" : ""}>${escapeHtml(category.name)}${category.active ? "" : " (archived)"}</option>`).join("")}
           </select>
         </label>
-        <label>Assigned employee
-          <select data-email-assignee="${email.id}">
-            <option value="" ${!email.assignedTo ? "selected" : ""}>Unassigned</option>
-            ${state.employees.map((employee) => `<option value="${escapeHtml(employee.id)}" ${employee.id === email.assignedTo ? "selected" : ""}>${escapeHtml(employee.name)} - ${escapeHtml(employee.department)}</option>`).join("")}
-          </select>
-        </label>
+        ${isAdminSession()
+          ? `<label>Assigned employee
+              <select data-email-assignee="${email.id}">
+                <option value="" ${!email.assignedTo ? "selected" : ""}>Unassigned</option>
+                ${state.employees.map((employee) => `<option value="${escapeHtml(employee.id)}" ${employee.id === email.assignedTo ? "selected" : ""}>${escapeHtml(employee.name)} - ${escapeHtml(employee.department)}</option>`).join("")}
+              </select>
+            </label>`
+          : `<div class="mini-stat"><span>${t("tasks.assignedTo")}</span><strong>${escapeHtml(assignedEmployee?.name || t("tasks.unassigned"))}</strong></div>`}
       </div>
 
       <div class="drawer-grid">
@@ -823,6 +910,41 @@ function renderConfirmModal() {
         <button class="btn ${dialog.tone === "danger" ? "danger" : "primary"}" data-confirm-primary>${escapeHtml(dialog.primaryLabel)}</button>
         <button class="btn subtle" data-confirm-cancel>Cancel</button>
       </div>
+    </div>
+  `;
+}
+
+function renderDemoSession() {
+  const root = document.querySelector("#authRoot");
+  if (!state.session) {
+    root.innerHTML = `
+      <div class="auth-overlay">
+        <div class="auth-panel">
+          <div>
+            <div class="badge lead">${t("auth.demoOnly")}</div>
+            <h1>${t("auth.title")}</h1>
+            <p>${t("auth.subtitle")}</p>
+          </div>
+          <div class="auth-grid">
+            ${state.demoAccounts.map((account) => `
+              <button class="auth-card" data-login-account="${account.id}">
+                <strong>${escapeHtml(account.name)}</strong>
+                <span>${escapeHtml(account.role)} - ${escapeHtml(account.title)}</span>
+                <small>${escapeHtml(account.email)}</small>
+              </button>
+            `).join("")}
+          </div>
+          <div class="preview">${t("auth.safetyNote")}</div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  root.innerHTML = `
+    <div class="session-pill">
+      <span>${escapeHtml(state.session.name)} · ${escapeHtml(state.session.role)}</span>
+      <button class="btn subtle" data-logout-demo>${t("auth.logout")}</button>
     </div>
   `;
 }
@@ -1374,6 +1496,7 @@ document.addEventListener("click", async (event) => {
         await deleteEmployee(dialog.employeeId);
         state.employees = await listEmployees();
         state.emails = await listEmails();
+        state.tasks = await listTasks();
         state.activity = await listActivity();
         state.selectedEmployee = null;
       }, "Employee removed and assigned emails returned to Unassigned.");
@@ -1391,6 +1514,23 @@ document.addEventListener("click", async (event) => {
       }, t("triage.removeSuccess"));
       return;
     }
+  }
+
+  if (target.dataset.loginAccount) {
+    await runAction("login-demo", async () => {
+      const session = await setDemoSession(target.dataset.loginAccount);
+      await refreshWorkspaceForSession();
+      state.tab = session.role === "Employee" ? "tasks" : "dashboard";
+    }, t("auth.loginToast"));
+    return;
+  }
+
+  if (target.dataset.logoutDemo !== undefined) {
+    await runAction("logout-demo", async () => {
+      await logoutDemoSession();
+      await refreshWorkspaceForSession();
+    }, t("auth.logoutToast"));
+    return;
   }
 
   if (target.dataset.tab) {
@@ -1665,6 +1805,7 @@ document.addEventListener("click", async (event) => {
     await runAction(`save-employee-${id}`, async () => {
       const saved = id === "new" ? await createEmployee(fields) : await updateEmployee(id, fields);
       state.employees = await listEmployees();
+      state.tasks = await listTasks();
       state.activity = await listActivity();
       state.selectedEmployee = state.employees.find((employee) => employee.id === saved.id) || null;
     }, id === "new" ? "Employee added locally." : "Employee changes saved locally.");
@@ -1807,6 +1948,22 @@ document.addEventListener("change", async (event) => {
     return;
   }
 
+  if (target.dataset.taskAssignee) {
+    const id = target.dataset.taskAssignee;
+    await runAction(`task-assignee-${id}`, async () => {
+      await updateTask(id, { assignedTo: target.value });
+      state.tasks = await listTasks();
+      state.activity = await listActivity();
+    }, t("tasks.assignedToast"));
+    return;
+  }
+
+  if (target.dataset.taskAssigneeFilter !== undefined) {
+    state.taskAssigneeFilter = target.value;
+    renderTasks();
+    return;
+  }
+
   if (target.dataset.composeAttachments !== undefined) {
     state.composeForm = {
       ...emptyComposeForm(),
@@ -1842,6 +1999,7 @@ document.addEventListener("change", async (event) => {
     await runAction(`assign-${id}`, async () => {
       await assignEmail(id, target.value);
       await refreshEmails(id);
+      state.tasks = await listTasks();
     }, "Email assignment updated locally.");
   }
 

@@ -118,6 +118,80 @@ aside {
   line-height: 1.45;
 }
 
+.session-pill {
+  position: fixed;
+  left: 22px;
+  bottom: 22px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px 8px 14px;
+  color: var(--text);
+  font-size: .85rem;
+}
+
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(245, 247, 251, .94);
+}
+
+.auth-panel {
+  width: min(720px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 28px;
+}
+
+.auth-panel h1 {
+  margin: 12px 0 6px;
+}
+
+.auth-panel p {
+  margin: 0 0 18px;
+  color: var(--muted);
+}
+
+.auth-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.auth-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface2);
+  padding: 16px;
+  text-align: left;
+  display: grid;
+  gap: 6px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.auth-card:hover {
+  border-color: var(--blue);
+  background: var(--blue2);
+}
+
+.auth-card span,
+.auth-card small {
+  color: var(--muted);
+}
+
 main {
   padding: 28px;
   max-width: 1220px;
@@ -952,5 +1026,15 @@ textarea {
 
   .assistant-form {
     grid-template-columns: 1fr;
+  }
+
+  .auth-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .session-pill {
+    left: 16px;
+    right: 16px;
+    justify-content: space-between;
   }
 }

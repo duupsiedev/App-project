@@ -55,6 +55,15 @@ const translations = {
       savedLanguage: "Saved language",
       languageNote: "Language changes apply after saving. Internal workflow values stay stable."
     },
+    auth: {
+      demoOnly: "Demo login",
+      title: "Choose a demo account",
+      subtitle: "Use a premade local account to preview what an owner or employee would see.",
+      safetyNote: "This is a local role switcher for the prototype, not real authentication or security.",
+      logout: "Switch account",
+      loginToast: "Demo account opened locally.",
+      logoutToast: "Demo account closed locally."
+    },
     triage: {
       inboxControl: "Inbox control",
       categoryFilter: "Category filter",
@@ -82,6 +91,11 @@ const translations = {
       priority: "Priority",
       source: "Source email",
       notes: "Notes",
+      assignedTo: "Assigned to",
+      assigneeFilter: "Assignee filter",
+      allAssignees: "All assignees",
+      unassigned: "Unassigned",
+      employeeScope: "Employee demo view: only tasks assigned to this account are shown.",
       notePlaceholder: "Add a local note",
       reviewEmail: "Review email",
       saveNote: "Save note",
@@ -94,7 +108,8 @@ const translations = {
       highPriority: "High priority",
       highCaption: "Review these first",
       completed: "Completed",
-      completedCaption: "Checked off in this browser"
+      completedCaption: "Checked off in this browser",
+      assignedToast: "Task assignment updated locally."
     },
     compose: {
       title: "Compose message",
@@ -177,6 +192,15 @@ const translations = {
       savedLanguage: "Langue enregistrée",
       languageNote: "Les changements de langue s'appliquent après l'enregistrement. Les valeurs internes du flux restent stables."
     },
+    auth: {
+      demoOnly: "Connexion démo",
+      title: "Choisir un compte démo",
+      subtitle: "Utilisez un compte local préparé pour voir ce qu'un propriétaire ou un employé verrait.",
+      safetyNote: "Ceci est un sélecteur de rôle local pour le prototype, pas une vraie authentification ni une vraie sécurité.",
+      logout: "Changer de compte",
+      loginToast: "Compte démo ouvert localement.",
+      logoutToast: "Compte démo fermé localement."
+    },
     triage: {
       inboxControl: "Contrôle de la boîte",
       categoryFilter: "Filtre de catégorie",
@@ -204,6 +228,11 @@ const translations = {
       priority: "Priorité",
       source: "Courriel source",
       notes: "Notes",
+      assignedTo: "Assigné à",
+      assigneeFilter: "Filtre par responsable",
+      allAssignees: "Tous les responsables",
+      unassigned: "Non assigné",
+      employeeScope: "Vue employé démo : seules les tâches assignées à ce compte sont affichées.",
       notePlaceholder: "Ajouter une note locale",
       reviewEmail: "Réviser le courriel",
       saveNote: "Enregistrer la note",
@@ -216,7 +245,8 @@ const translations = {
       highPriority: "Priorité élevée",
       highCaption: "À réviser en premier",
       completed: "Terminées",
-      completedCaption: "Cochées dans ce navigateur"
+      completedCaption: "Cochées dans ce navigateur",
+      assignedToast: "Assignation de tâche mise à jour localement."
     },
     compose: {
       title: "Composer un message",

@@ -5,7 +5,26 @@ import { mockRules } from "../data/mockRules.js";
 
 const STORAGE_KEY = "courio.mockState.v1";
 const CHAT_STORAGE_KEY = "courio.assistantHistory.v1";
+const SESSION_STORAGE_KEY = "courio.demoSession.v1";
 const STATE_SCHEMA_VERSION = 2;
+const DEMO_ACCOUNTS = [
+  {
+    id: "admin-owner",
+    role: "Admin",
+    employeeId: "emp-1",
+    name: "Nadia Patel",
+    title: "Owner",
+    email: "nadia@courio-demo.ca"
+  },
+  {
+    id: "employee-marcus",
+    role: "Employee",
+    employeeId: "emp-2",
+    name: "Marcus Roy",
+    title: "Bookkeeper",
+    email: "marcus@courio-demo.ca"
+  }
+];
 
 const WORKFLOW_STATE = Object.freeze({
   NEEDS_REVIEW: "needs_review",
@@ -142,6 +161,7 @@ const defaultState = {
 
 const state = loadState();
 let assistantHistory = loadAssistantHistory();
+let demoSession = loadDemoSession();
 const delay = (ms = 550) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function clone(value) {
@@ -328,8 +348,10 @@ function normalizeTask(task) {
     description: task.description || "",
     priority: task.priority || "Medium",
     category: task.category || "General",
+    assignedTo: task.assignedTo || "",
     status: task.status === "Done" ? "Done" : "Open",
     notes: task.notes || "",
+    history: Array.isArray(task.history) ? task.history : [],
     createdAt: task.createdAt || new Date().toISOString(),
     updatedAt: task.updatedAt || task.createdAt || new Date().toISOString(),
     completedAt: task.completedAt || null
@@ -378,6 +400,39 @@ function mergeById(defaultItems, savedItems = []) {
 
 function persistState() {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function loadDemoSession() {
+  try {
+    const saved = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!saved) return null;
+    const parsed = JSON.parse(saved);
+    return DEMO_ACCOUNTS.find((account) => account.id === parsed.id) || null;
+  } catch {
+    return null;
+  }
+}
+
+function persistDemoSession() {
+  if (!demoSession) {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ id: demoSession.id }));
+}
+
+function isEmployeeSession() {
+  return demoSession?.role === "Employee";
+}
+
+function sessionEmployeeId() {
+  return demoSession?.employeeId || "";
+}
+
+function requireAdmin() {
+  if (demoSession && demoSession.role !== "Admin") {
+    throw new Error("This demo account cannot access admin-only actions.");
+  }
 }
 
 /*
@@ -558,8 +613,13 @@ function createTaskFromEmail(email) {
     description: email.summary || email.explanation || email.subject,
     priority: taskPriorityForEmail(email),
     category: email.category,
+    assignedTo: email.assignedTo || "",
     status: "Open",
     notes: "",
+    history: [{
+      at: now,
+      label: "Task created from local inbox item"
+    }],
     createdAt: now,
     updatedAt: now
   });
@@ -583,6 +643,7 @@ function syncTasksFromEmails() {
       title: task.title || email.suggestedAction,
       description: task.description || email.summary || email.explanation,
       priority: task.priority || taskPriorityForEmail(email),
+      assignedTo: task.assignedTo || email.assignedTo || "",
       category: email.category
     });
   });
@@ -590,8 +651,10 @@ function syncTasksFromEmails() {
 
 function buildTaskView(task) {
   const email = state.emails.find((item) => item.id === task.emailId);
+  const assignedEmployee = state.employees.find((employee) => employee.id === task.assignedTo) || null;
   return {
     ...task,
+    assignedEmployee: assignedEmployee ? clone(assignedEmployee) : null,
     sourceEmail: email ? buildEmailView(email) : null,
     hiddenFromInbox: Boolean(email?.archivedAt),
     sourceCompleted: email ? emailIsComplete(email) : false
@@ -641,7 +704,11 @@ function findDraftByEmailId(emailId) {
 }
 
 function visibleEmails() {
-  return state.emails.filter((email) => !email.archivedAt);
+  return state.emails.filter((email) => {
+    if (email.archivedAt) return false;
+    if (isEmployeeSession()) return email.assignedTo === sessionEmployeeId();
+    return true;
+  });
 }
 
 function findEmployee(id) {
@@ -935,6 +1002,32 @@ export async function listEmails() {
   return clone(visibleEmails().map(buildEmailView));
 }
 
+export async function listDemoAccounts() {
+  await delay(150);
+  return clone(DEMO_ACCOUNTS);
+}
+
+export async function getDemoSession() {
+  await delay(150);
+  return clone(demoSession);
+}
+
+export async function setDemoSession(accountId) {
+  await delay(250);
+  const account = DEMO_ACCOUNTS.find((item) => item.id === accountId);
+  if (!account) throw new Error("Demo account not found.");
+  demoSession = account;
+  persistDemoSession();
+  return clone(demoSession);
+}
+
+export async function logoutDemoSession() {
+  await delay(150);
+  demoSession = null;
+  persistDemoSession();
+  return null;
+}
+
 export async function listTasks() {
   await delay(350);
   syncTasksFromEmails();
@@ -943,6 +1036,7 @@ export async function listTasks() {
     state.tasks
       .map(buildTaskView)
       .filter((task) => !task.hiddenFromInbox)
+      .filter((task) => !isEmployeeSession() || task.assignedTo === sessionEmployeeId())
       .sort((left, right) => (
         taskRank(left) - taskRank(right)
         || (left.status === "Done") - (right.status === "Done")
@@ -963,6 +1057,7 @@ export async function listCategories() {
 
 export async function listRules() {
   await delay(400);
+  if (isEmployeeSession()) return [];
   return clone(state.rules);
 }
 
@@ -978,6 +1073,7 @@ export async function generateMorningDigest() {
 
 export async function listDrafts() {
   await delay(400);
+  if (isEmployeeSession()) return [];
   return clone(state.drafts.map(buildDraftView));
 }
 
@@ -1054,6 +1150,7 @@ export async function getSettings() {
 
 export async function saveSettings(settings) {
   await delay(450);
+  requireAdmin();
   state.settings = {
     ...state.settings,
     ...settings,
@@ -1067,6 +1164,7 @@ export async function saveSettings(settings) {
 
 export async function resetDemoData() {
   await delay(350);
+  requireAdmin();
   window.localStorage.removeItem(STORAGE_KEY);
   window.localStorage.removeItem(CHAT_STORAGE_KEY);
   return clone(defaultState);
@@ -1154,6 +1252,7 @@ export async function saveDraft(id, draftText) {
 
 export async function approveDraft(id) {
   await delay();
+  requireAdmin();
   const draft = findDraft(id);
   const email = findEmail(draft.emailId || draft.id);
   if (emailIsComplete(email)) {
@@ -1169,6 +1268,7 @@ export async function approveDraft(id) {
 
 export async function approveDrafts(ids) {
   await delay(650);
+  requireAdmin();
   if (!ids.length) throw new Error("Select at least one draft first.");
 
   const candidates = ids
@@ -1199,6 +1299,7 @@ export async function approveDrafts(ids) {
 
 export async function approveLowRiskDrafts() {
   await delay(700);
+  requireAdmin();
   if (!lowRiskBulkApprovalEnabled()) {
     throw new Error("Low-risk bulk approval is disabled by workspace settings.");
   }
@@ -1218,6 +1319,7 @@ export async function approveLowRiskDrafts() {
 
 export async function toggleRule(id) {
   await delay(450);
+  requireAdmin();
   const rule = state.rules.find((item) => item.id === id);
   if (!rule) throw new Error("Rule not found.");
   rule.on = !rule.on;
@@ -1227,6 +1329,7 @@ export async function toggleRule(id) {
 
 export async function updateRule(id, updates) {
   await delay(500);
+  requireAdmin();
   const rule = state.rules.find((item) => item.id === id);
   if (!rule) throw new Error("Rule not found.");
   if (!updates.title?.trim()) throw new Error("Rule name is required.");
@@ -1244,6 +1347,7 @@ export async function updateRule(id, updates) {
 
 export async function deleteRule(id) {
   await delay(450);
+  requireAdmin();
   const index = state.rules.findIndex((item) => item.id === id);
   if (index === -1) throw new Error("Rule not found.");
   const [deleted] = state.rules.splice(index, 1);
@@ -1307,16 +1411,41 @@ export async function updateTask(id, updates = {}) {
   syncTasksFromEmails();
   const task = state.tasks.find((item) => item.id === id);
   if (!task) throw new Error("Task not found.");
+  if (isEmployeeSession() && task.assignedTo !== sessionEmployeeId()) {
+    throw new Error("This demo employee can only update assigned tasks.");
+  }
 
   const wasDone = task.status === "Done";
+  const now = new Date().toISOString();
+  if (updates.assignedTo !== undefined) {
+    if (isEmployeeSession()) throw new Error("Only the demo admin can reassign tasks.");
+    if (updates.assignedTo) findEmployee(updates.assignedTo);
+    task.assignedTo = updates.assignedTo;
+    task.history = [
+      ...(task.history || []),
+      {
+        at: now,
+        label: updates.assignedTo
+          ? `Assigned to ${findEmployee(updates.assignedTo).name}`
+          : "Returned to Unassigned"
+      }
+    ];
+  }
   if (updates.notes !== undefined) {
     task.notes = String(updates.notes).trim();
   }
   if (updates.status !== undefined) {
     task.status = updates.status === "Done" ? "Done" : "Open";
-    task.completedAt = task.status === "Done" ? task.completedAt || new Date().toISOString() : null;
+    task.completedAt = task.status === "Done" ? task.completedAt || now : null;
+    task.history = [
+      ...(task.history || []),
+      {
+        at: now,
+        label: task.status === "Done" ? "Marked complete" : "Reopened"
+      }
+    ];
   }
-  task.updatedAt = new Date().toISOString();
+  task.updatedAt = now;
 
   if (!wasDone && task.status === "Done") {
     recordActivity("task-completed", {
@@ -1332,6 +1461,7 @@ export async function updateTask(id, updates = {}) {
 
 export async function createCategory(category) {
   await delay(450);
+  requireAdmin();
   const normalized = normalizeCategoryInput(category);
   const created = {
     id: `cat-${Date.now()}`,
@@ -1350,6 +1480,7 @@ export async function createCategory(category) {
 
 export async function updateCategory(id, updates) {
   await delay(450);
+  requireAdmin();
   const category = findCategory(id);
   const normalized = normalizeCategoryInput(updates, id);
   const oldName = category.name;
@@ -1365,6 +1496,7 @@ export async function updateCategory(id, updates) {
 
 export async function toggleCategoryActive(id) {
   await delay(400);
+  requireAdmin();
   const category = findCategory(id);
   category.active = !category.active;
   recordActivity("category-toggled", {
@@ -1377,15 +1509,29 @@ export async function toggleCategoryActive(id) {
 
 export async function assignEmail(id, employeeId) {
   await delay(400);
+  requireAdmin();
   if (employeeId) findEmployee(employeeId);
   const email = findEmail(id);
   email.assignedTo = employeeId;
+  const task = state.tasks.find((item) => item.emailId === id);
+  if (task) {
+    task.assignedTo = employeeId;
+    task.updatedAt = new Date().toISOString();
+    task.history = [
+      ...(task.history || []),
+      {
+        at: task.updatedAt,
+        label: employeeId ? `Assigned from email to ${findEmployee(employeeId).name}` : "Returned to Unassigned from email"
+      }
+    ];
+  }
   persistState();
   return clone(email);
 }
 
 export async function createEmployee(employee) {
   await delay(500);
+  requireAdmin();
   const normalized = normalizeEmployeeInput(employee);
 
   const created = {
@@ -1403,6 +1549,7 @@ export async function createEmployee(employee) {
 
 export async function updateEmployee(id, updates) {
   await delay(500);
+  requireAdmin();
   const employee = findEmployee(id);
   const normalized = normalizeEmployeeInput(updates, id);
 
@@ -1417,6 +1564,7 @@ export async function updateEmployee(id, updates) {
 
 export async function deleteEmployee(id) {
   await delay(500);
+  requireAdmin();
   const index = state.employees.findIndex((item) => item.id === id);
   if (index === -1) throw new Error("Employee not found.");
   const [deleted] = state.employees.splice(index, 1);
@@ -1426,6 +1574,19 @@ export async function deleteEmployee(id) {
     if (email.assignedTo === id) {
       email.assignedTo = "";
       reassignedCount += 1;
+    }
+  });
+  state.tasks.forEach((task) => {
+    if (task.assignedTo === id) {
+      task.assignedTo = "";
+      task.updatedAt = new Date().toISOString();
+      task.history = [
+        ...(task.history || []),
+        {
+          at: task.updatedAt,
+          label: "Assigned employee was removed; task returned to Unassigned"
+        }
+      ];
     }
   });
   recordActivity("employee-deleted", {
