@@ -341,6 +341,11 @@ function normalizeDraft(draft) {
 }
 
 function normalizeTask(task) {
+  const followUp = task.followUp && typeof task.followUp === "object"
+    ? task.followUp
+    : {};
+  const followUpEnabled = Boolean(followUp.enabled && followUp.dueAt);
+
   return {
     id: task.id || `task-${task.emailId || Date.now()}`,
     emailId: task.emailId || "",
@@ -351,6 +356,12 @@ function normalizeTask(task) {
     assignedTo: task.assignedTo || "",
     status: task.status === "Done" ? "Done" : "Open",
     notes: task.notes || "",
+    followUp: {
+      enabled: followUpEnabled,
+      dueAt: followUpEnabled ? followUp.dueAt : null,
+      createdAt: followUpEnabled ? followUp.createdAt || task.createdAt || new Date().toISOString() : null,
+      updatedAt: followUpEnabled ? followUp.updatedAt || task.updatedAt || new Date().toISOString() : null
+    },
     history: Array.isArray(task.history) ? task.history : [],
     createdAt: task.createdAt || new Date().toISOString(),
     updatedAt: task.updatedAt || task.createdAt || new Date().toISOString(),
@@ -652,8 +663,19 @@ function syncTasksFromEmails() {
 function buildTaskView(task) {
   const email = state.emails.find((item) => item.id === task.emailId);
   const assignedEmployee = state.employees.find((employee) => employee.id === task.assignedTo) || null;
+  const followUpDueAt = task.followUp?.enabled ? task.followUp.dueAt : null;
+  const followUpOverdue = Boolean(
+    followUpDueAt
+    && task.status !== "Done"
+    && new Date(followUpDueAt).getTime() < Date.now()
+  );
   return {
     ...task,
+    followUp: {
+      ...task.followUp,
+      status: !followUpDueAt ? "not_scheduled" : followUpOverdue ? "overdue" : "scheduled",
+      overdue: followUpOverdue
+    },
     assignedEmployee: assignedEmployee ? clone(assignedEmployee) : null,
     sourceEmail: email ? buildEmailView(email) : null,
     hiddenFromInbox: Boolean(email?.archivedAt),
@@ -1455,6 +1477,57 @@ export async function updateTask(id, updates = {}) {
     });
   }
 
+  persistState();
+  return clone(buildTaskView(task));
+}
+
+export async function updateTaskFollowUp(id, updates = {}) {
+  await delay(400);
+  syncTasksFromEmails();
+  const task = state.tasks.find((item) => item.id === id);
+  if (!task) throw new Error("Task not found.");
+  if (isEmployeeSession() && task.assignedTo !== sessionEmployeeId()) {
+    throw new Error("This demo employee can only update assigned tasks.");
+  }
+
+  const enabled = Boolean(updates.enabled);
+  const now = new Date().toISOString();
+  let dueAt = null;
+
+  if (enabled) {
+    const requestedDate = updates.dueAt
+      ? new Date(`${updates.dueAt}T17:00:00`)
+      : new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    if (Number.isNaN(requestedDate.getTime())) {
+      throw new Error("Choose a valid follow-up date.");
+    }
+    dueAt = requestedDate.toISOString();
+  }
+
+  task.followUp = {
+    enabled,
+    dueAt,
+    createdAt: enabled ? task.followUp?.createdAt || now : null,
+    updatedAt: enabled ? now : null
+  };
+  task.updatedAt = now;
+  task.history = [
+    ...(task.history || []),
+    {
+      at: now,
+      label: enabled
+        ? `Follow-up scheduled for ${dueAt.slice(0, 10)}`
+        : "Follow-up reminder removed"
+    }
+  ];
+  recordActivity(enabled ? "follow-up-scheduled" : "follow-up-removed", {
+    taskId: task.id,
+    emailId: task.emailId,
+    dueAt,
+    label: enabled
+      ? `Follow-up scheduled: ${task.title}`
+      : `Follow-up removed: ${task.title}`
+  });
   persistState();
   return clone(buildTaskView(task));
 }

@@ -664,6 +664,40 @@ textarea {
   width: 100%;
 }
 
+.task-filters {
+  display: flex;
+  gap: 8px;
+  width: min(620px, 100%);
+}
+
+.task-filters select {
+  min-width: 0;
+}
+
+.follow-up-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.follow-up-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.follow-up-date {
+  width: 150px;
+}
+
+.follow-up-overdue {
+  color: var(--red);
+  font-weight: 700;
+}
+
 .segmented {
   display: inline-flex;
   gap: 4px;

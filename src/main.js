@@ -44,6 +44,7 @@ import {
   updateRule,
   updateEmailCategory,
   updateTask,
+  updateTaskFollowUp,
   logoutDemoSession
 } from "./api/mockApi.js";
 
@@ -88,6 +89,7 @@ const state = {
   triageFilter: "all",
   triageCategoryFilter: "all",
   taskAssigneeFilter: "all",
+  taskFollowUpFilter: "all",
   draftFilter: "all",
   ruleQuery: "",
   assistantOpen: false,
@@ -651,9 +653,13 @@ function renderTriage() {
 
 function renderTasks() {
   const visibleTasks = state.tasks.filter((task) => {
-    if (!isAdminSession() || state.taskAssigneeFilter === "all") return true;
-    if (state.taskAssigneeFilter === "unassigned") return !task.assignedTo;
-    return task.assignedTo === state.taskAssigneeFilter;
+    const matchesAssignee = !isAdminSession()
+      || state.taskAssigneeFilter === "all"
+      || (state.taskAssigneeFilter === "unassigned" ? !task.assignedTo : task.assignedTo === state.taskAssigneeFilter);
+    const matchesFollowUp = state.taskFollowUpFilter === "all"
+      || (state.taskFollowUpFilter === "scheduled" && task.followUp?.enabled)
+      || (state.taskFollowUpFilter === "overdue" && task.followUp?.overdue);
+    return matchesAssignee && matchesFollowUp;
   });
   const openCount = visibleTasks.filter((task) => task.status !== "Done").length;
   const highCount = visibleTasks.filter((task) => task.status !== "Done" && task.priority === "High").length;
@@ -669,6 +675,16 @@ function renderTasks() {
                 <strong>${escapeHtml(task.title)}</strong><br>
                 <small>${escapeHtml(task.description)}</small>
                 ${(task.history || []).length ? `<br><small>${escapeHtml(task.history.at(-1)?.label || "")}</small>` : ""}
+                <div class="follow-up-control">
+                  <label class="follow-up-toggle">
+                    <input type="checkbox" data-task-follow-up="${task.id}" ${task.followUp?.enabled ? "checked" : ""}>
+                    <span>${task.followUp?.enabled ? t("tasks.reminderOn") : t("tasks.reminderOff")}</span>
+                  </label>
+                  ${task.followUp?.enabled ? `
+                    <input class="follow-up-date" type="date" data-task-follow-up-date="${task.id}" value="${escapeHtml(task.followUp.dueAt?.slice(0, 10) || "")}" aria-label="${t("tasks.followUpDate")}">
+                    <small class="${task.followUp.overdue ? "follow-up-overdue" : ""}">${task.followUp.overdue ? t("tasks.overdue") : t("tasks.scheduled")}</small>
+                  ` : ""}
+                </div>
               </td>
               <td><span class="badge ${task.priority === "High" ? "urgent" : task.priority === "Low" ? "done" : "pending"}">${escapeHtml(task.priority)}</span><br><small>${escapeHtml(task.category)}</small></td>
               <td>
@@ -711,14 +727,28 @@ function renderTasks() {
     <div class="panel" style="margin-top:16px">
       <div class="panel-title"><h2>${t("tasks.title")}</h2><span>${t("tasks.subtitle")}</span></div>
       ${isAdminSession() ? `
-        <div class="list-toolbar" style="margin-bottom:14px">
+        <div class="list-toolbar task-filters" style="margin-bottom:14px">
           <select data-task-assignee-filter aria-label="${t("tasks.assigneeFilter")}">
             <option value="all" ${state.taskAssigneeFilter === "all" ? "selected" : ""}>${t("tasks.allAssignees")}</option>
             <option value="unassigned" ${state.taskAssigneeFilter === "unassigned" ? "selected" : ""}>${t("tasks.unassigned")}</option>
             ${state.employees.map((employee) => `<option value="${employee.id}" ${state.taskAssigneeFilter === employee.id ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("")}
           </select>
+          <select data-task-follow-up-filter aria-label="${t("tasks.followUpFilter")}">
+            <option value="all" ${state.taskFollowUpFilter === "all" ? "selected" : ""}>${t("tasks.allFollowUps")}</option>
+            <option value="scheduled" ${state.taskFollowUpFilter === "scheduled" ? "selected" : ""}>${t("tasks.scheduledFollowUps")}</option>
+            <option value="overdue" ${state.taskFollowUpFilter === "overdue" ? "selected" : ""}>${t("tasks.overdueFollowUps")}</option>
+          </select>
         </div>
-      ` : `<div class="preview" style="margin-bottom:14px">${t("tasks.employeeScope")}</div>`}
+      ` : `
+        <div class="preview" style="margin-bottom:14px">${t("tasks.employeeScope")}</div>
+        <div class="list-toolbar task-filters" style="margin-bottom:14px">
+          <select data-task-follow-up-filter aria-label="${t("tasks.followUpFilter")}">
+            <option value="all" ${state.taskFollowUpFilter === "all" ? "selected" : ""}>${t("tasks.allFollowUps")}</option>
+            <option value="scheduled" ${state.taskFollowUpFilter === "scheduled" ? "selected" : ""}>${t("tasks.scheduledFollowUps")}</option>
+            <option value="overdue" ${state.taskFollowUpFilter === "overdue" ? "selected" : ""}>${t("tasks.overdueFollowUps")}</option>
+          </select>
+        </div>
+      `}
       ${content}
     </div>
   `;
@@ -1960,6 +1990,32 @@ document.addEventListener("change", async (event) => {
 
   if (target.dataset.taskAssigneeFilter !== undefined) {
     state.taskAssigneeFilter = target.value;
+    renderTasks();
+    return;
+  }
+
+  if (target.dataset.taskFollowUp !== undefined) {
+    const id = target.dataset.taskFollowUp;
+    await runAction(`task-follow-up-${id}`, async () => {
+      await updateTaskFollowUp(id, { enabled: target.checked });
+      state.tasks = await listTasks();
+      state.activity = await listActivity();
+    }, target.checked ? t("tasks.followUpScheduledToast") : t("tasks.followUpRemovedToast"));
+    return;
+  }
+
+  if (target.dataset.taskFollowUpDate !== undefined) {
+    const id = target.dataset.taskFollowUpDate;
+    await runAction(`task-follow-up-${id}`, async () => {
+      await updateTaskFollowUp(id, { enabled: true, dueAt: target.value });
+      state.tasks = await listTasks();
+      state.activity = await listActivity();
+    }, t("tasks.followUpUpdatedToast"));
+    return;
+  }
+
+  if (target.dataset.taskFollowUpFilter !== undefined) {
+    state.taskFollowUpFilter = target.value;
     renderTasks();
     return;
   }
