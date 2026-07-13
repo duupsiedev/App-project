@@ -83,6 +83,7 @@ const state = {
   selectedDraft: null,
   selectedRule: null,
   selectedEmployee: null,
+  selectedTask: null,
   selectedDraftIds: [],
   confirmDialog: null,
   digest: null,
@@ -382,6 +383,20 @@ function t(key) {
   return createTranslator(currentLanguage())(key);
 }
 
+function formatLocalDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString();
+}
+
+function formatLocalDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString();
+}
+
 function renderShellCopy() {
   const translate = createTranslator(currentLanguage());
   document.querySelectorAll("[data-copy]").forEach((element) => {
@@ -663,6 +678,7 @@ function renderTasks() {
   });
   const openCount = visibleTasks.filter((task) => task.status !== "Done").length;
   const highCount = visibleTasks.filter((task) => task.status !== "Done" && task.priority === "High").length;
+  const overdueCount = visibleTasks.filter((task) => task.followUp?.overdue).length;
   const content = visibleTasks.length === 0
     ? `<div class="empty-state">${t("tasks.empty")}</div>`
     : `<table class="table">
@@ -674,7 +690,12 @@ function renderTasks() {
               <td>
                 <strong>${escapeHtml(task.title)}</strong><br>
                 <small>${escapeHtml(task.description)}</small>
-                ${(task.history || []).length ? `<br><small>${escapeHtml(task.history.at(-1)?.label || "")}</small>` : ""}
+                ${task.historySummary?.latestLabel ? `
+                  <div class="task-history-summary">
+                    <span>${t("tasks.latestActivity")}:</span> ${escapeHtml(task.historySummary.latestLabel)}
+                    ${task.historySummary.latestAt ? `<small>${escapeHtml(formatLocalDateTime(task.historySummary.latestAt))}</small>` : ""}
+                  </div>
+                ` : ""}
                 <div class="follow-up-control">
                   <label class="follow-up-toggle">
                     <input type="checkbox" data-task-follow-up="${task.id}" ${task.followUp?.enabled ? "checked" : ""}>
@@ -682,7 +703,7 @@ function renderTasks() {
                   </label>
                   ${task.followUp?.enabled ? `
                     <input class="follow-up-date" type="date" data-task-follow-up-date="${task.id}" value="${escapeHtml(task.followUp.dueAt?.slice(0, 10) || "")}" aria-label="${t("tasks.followUpDate")}">
-                    <small class="${task.followUp.overdue ? "follow-up-overdue" : ""}">${task.followUp.overdue ? t("tasks.overdue") : t("tasks.scheduled")}</small>
+                    <small class="${task.followUp.overdue ? "follow-up-overdue" : ""}">${task.followUp.overdue ? t("tasks.overdue") : `${t("tasks.scheduled")} ${formatLocalDate(task.followUp.dueAt)}`}</small>
                   ` : ""}
                 </div>
               </td>
@@ -699,6 +720,7 @@ function renderTasks() {
               <td><textarea data-task-note="${task.id}" placeholder="${t("tasks.notePlaceholder")}">${escapeHtml(task.notes || "")}</textarea></td>
               <td class="actions">
                 ${task.sourceEmail ? `<button class="btn subtle" data-review-email="${task.sourceEmail.id}">${t("tasks.reviewEmail")}</button>` : ""}
+                <button class="btn subtle" data-review-task="${task.id}">${t("tasks.viewHistory")}</button>
                 <button class="btn subtle" data-save-task-note="${task.id}" ${isBusy(`task-note-${task.id}`) ? "disabled" : ""}>${isBusy(`task-note-${task.id}`) ? t("tasks.saving") : t("tasks.saveNote")}</button>
               </td>
             </tr>
@@ -719,9 +741,9 @@ function renderTasks() {
         <div class="caption">${t("tasks.highCaption")}</div>
       </div>
       <div class="panel metric">
-        <div class="label">${t("tasks.completed")}</div>
-        <div class="value">${visibleTasks.filter((task) => task.status === "Done").length}</div>
-        <div class="caption">${t("tasks.completedCaption")}</div>
+        <div class="label">${t("tasks.followUp")}</div>
+        <div class="value">${overdueCount}</div>
+        <div class="caption">${overdueCount ? t("tasks.overdueCaption") : t("tasks.noOverdueCaption")}</div>
       </div>
     </div>
     <div class="panel" style="margin-top:16px">
@@ -830,6 +852,11 @@ function renderDrawer() {
 
   if (state.selectedDraft) {
     renderDraftDrawer(root);
+    return;
+  }
+
+  if (state.selectedTask) {
+    renderTaskDrawer(root);
     return;
   }
 
@@ -1184,6 +1211,58 @@ function renderEmployeeDrawer(root) {
         <button class="btn subtle" data-close-drawer>Close</button>
       </div>
       <p class="drawer-note">Employee records remain fake and local to this browser. Email addresses must be valid and unique.</p>
+    </aside>
+  `;
+}
+
+function renderTaskDrawer(root) {
+  const task = state.selectedTask;
+  const history = Array.isArray(task.history) ? task.history : [];
+  const followUpLabel = task.followUp?.enabled
+    ? task.followUp.overdue
+      ? `${t("tasks.overdue")} - ${formatLocalDate(task.followUp.dueAt)}`
+      : `${t("tasks.scheduled")} ${formatLocalDate(task.followUp.dueAt)}`
+    : t("tasks.noReminder");
+
+  root.innerHTML = `
+    <div class="drawer-backdrop" data-close-drawer></div>
+    <aside class="review-drawer" aria-label="${t("tasks.historyTitle")}">
+      <div class="drawer-header">
+        <div>
+          <div class="badge ${task.priority === "High" ? "urgent" : task.priority === "Low" ? "done" : "pending"}">${escapeHtml(task.priority)}</div>
+          <h2>${escapeHtml(task.title)}</h2>
+          <p>${escapeHtml(task.sourceEmail?.subject || t("tasks.localTask"))}</p>
+        </div>
+        <button class="btn subtle" data-close-drawer>Close</button>
+      </div>
+
+      <div class="drawer-grid">
+        <div class="mini-stat"><span>${t("tasks.assignedTo")}</span><strong>${escapeHtml(task.assignedEmployee?.name || t("tasks.unassigned"))}</strong></div>
+        <div class="mini-stat"><span>${t("tasks.followUp")}</span><strong>${escapeHtml(followUpLabel)}</strong></div>
+      </div>
+
+      <div class="drawer-section">
+        <h3>${t("tasks.historyTitle")}</h3>
+        ${history.length
+          ? `<ol class="task-history-list">${history.map((item) => `
+              <li>
+                <strong>${escapeHtml(item.label || t("tasks.historyFallback"))}</strong>
+                ${item.at ? `<time>${escapeHtml(formatLocalDateTime(item.at))}</time>` : ""}
+              </li>
+            `).join("")}</ol>`
+          : `<div class="empty-state">${t("tasks.noHistory")}</div>`}
+      </div>
+
+      <div class="drawer-section">
+        <h3>${t("tasks.notes")}</h3>
+        <div class="preview">${escapeHtml(task.notes || t("tasks.noNotes"))}</div>
+      </div>
+
+      <div class="drawer-actions">
+        ${task.sourceEmail ? `<button class="btn subtle" data-review-email="${task.sourceEmail.id}">${t("tasks.reviewEmail")}</button>` : ""}
+        <button class="btn subtle" data-close-drawer>Close</button>
+      </div>
+      <p class="drawer-note">${t("tasks.historyNote")}</p>
     </aside>
   `;
 }
@@ -1664,6 +1743,7 @@ document.addEventListener("click", async (event) => {
       state.selectedRule = null;
       state.selectedEmployee = null;
       state.selectedCategory = null;
+      state.selectedTask = null;
       state.summary = "";
       state.showExplanation = false;
     }, "Message thread opened.");
@@ -1677,6 +1757,7 @@ document.addEventListener("click", async (event) => {
       state.selectedRule = null;
       state.selectedEmployee = null;
       state.selectedCategory = null;
+      state.selectedTask = null;
       state.summary = "";
       state.showExplanation = false;
     }, "Draft opened for review.");
@@ -1690,9 +1771,22 @@ document.addEventListener("click", async (event) => {
       state.selectedRule = null;
       state.selectedEmployee = null;
       state.selectedCategory = null;
+      state.selectedTask = null;
       state.summary = "";
       state.showExplanation = false;
     }, "Draft opened for editing.");
+  }
+
+  if (target.dataset.reviewTask) {
+    const id = target.dataset.reviewTask;
+    state.selectedTask = state.tasks.find((task) => task.id === id) || null;
+    state.selectedEmail = null;
+    state.selectedDraft = null;
+    state.selectedRule = null;
+    state.selectedEmployee = null;
+    state.selectedCategory = null;
+    render();
+    return;
   }
 
   if (target.dataset.saveTaskNote) {
@@ -1712,6 +1806,7 @@ document.addEventListener("click", async (event) => {
     state.selectedRule = null;
     state.selectedEmployee = null;
     state.selectedCategory = null;
+    state.selectedTask = null;
     state.summary = "";
     state.showExplanation = false;
     render();
@@ -1774,6 +1869,7 @@ document.addEventListener("click", async (event) => {
       state.selectedDraft = null;
       state.selectedEmployee = null;
       state.selectedCategory = null;
+      state.selectedTask = null;
     }, "Rule opened for local editing.");
   }
 

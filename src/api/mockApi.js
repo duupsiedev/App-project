@@ -664,6 +664,8 @@ function buildTaskView(task) {
   const email = state.emails.find((item) => item.id === task.emailId);
   const assignedEmployee = state.employees.find((employee) => employee.id === task.assignedTo) || null;
   const followUpDueAt = task.followUp?.enabled ? task.followUp.dueAt : null;
+  const history = Array.isArray(task.history) ? task.history : [];
+  const latestHistory = history.at(-1) || null;
   const followUpOverdue = Boolean(
     followUpDueAt
     && task.status !== "Done"
@@ -675,6 +677,11 @@ function buildTaskView(task) {
       ...task.followUp,
       status: !followUpDueAt ? "not_scheduled" : followUpOverdue ? "overdue" : "scheduled",
       overdue: followUpOverdue
+    },
+    historySummary: {
+      count: history.length,
+      latestLabel: latestHistory?.label || "",
+      latestAt: latestHistory?.at || null
     },
     assignedEmployee: assignedEmployee ? clone(assignedEmployee) : null,
     sourceEmail: email ? buildEmailView(email) : null,

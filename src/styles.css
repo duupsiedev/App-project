@@ -698,6 +698,43 @@ textarea {
   font-weight: 700;
 }
 
+.task-history-summary {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: .82rem;
+  line-height: 1.35;
+}
+
+.task-history-summary span {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.task-history-summary small {
+  display: block;
+  margin-top: 2px;
+}
+
+.task-history-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.task-history-list li strong {
+  display: block;
+  color: var(--text);
+  font-size: .92rem;
+}
+
+.task-history-list time {
+  display: block;
+  margin-top: 3px;
+  font-size: .8rem;
+}
+
 .segmented {
   display: inline-flex;
   gap: 4px;

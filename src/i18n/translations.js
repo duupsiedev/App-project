@@ -123,7 +123,17 @@ const translations = {
       highCaption: "Review these first",
       completed: "Completed",
       completedCaption: "Checked off in this browser",
-      assignedToast: "Task assignment updated locally."
+      assignedToast: "Task assignment updated locally.",
+      latestActivity: "Latest activity",
+      viewHistory: "History",
+      historyTitle: "Task history",
+      historyFallback: "Task updated",
+      noHistory: "No activity yet for this local task.",
+      noNotes: "No notes yet.",
+      historyNote: "This history is fake/local and helps show who touched the workflow in this browser.",
+      localTask: "Local task",
+      overdueCaption: "Needs follow-up now",
+      noOverdueCaption: "No overdue reminders"
     },
     compose: {
       title: "Compose message",
@@ -274,7 +284,17 @@ const translations = {
       highCaption: "À réviser en premier",
       completed: "Terminées",
       completedCaption: "Cochées dans ce navigateur",
-      assignedToast: "Assignation de tâche mise à jour localement."
+      assignedToast: "Assignation de tâche mise à jour localement.",
+      latestActivity: "Activité récente",
+      viewHistory: "Historique",
+      historyTitle: "Historique de la tâche",
+      historyFallback: "Tâche mise à jour",
+      noHistory: "Aucune activité pour cette tâche locale.",
+      noNotes: "Aucune note pour l'instant.",
+      historyNote: "Cet historique est faux/local et montre qui a touché au flux dans ce navigateur.",
+      localTask: "Tâche locale",
+      overdueCaption: "Suivi requis maintenant",
+      noOverdueCaption: "Aucun rappel en retard"
     },
     compose: {
       title: "Composer un message",
