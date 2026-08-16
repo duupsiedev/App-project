@@ -48,6 +48,10 @@ import {
   logoutDemoSession
 } from "./api/mockApi.js";
 
+// ============================================================================
+// App constants and local UI state
+// ============================================================================
+
 const app = document.querySelector("#app");
 const VALID_TABS = new Set(["dashboard", "import", "triage", "tasks", "compose", "rules", "drafts", "admin"]);
 
@@ -110,6 +114,10 @@ const state = {
   showExplanation: false
 };
 
+// ============================================================================
+// Static app shell
+// ============================================================================
+
 app.innerHTML = `
   <div class="app">
     <aside>
@@ -166,6 +174,10 @@ app.innerHTML = `
   <div class="toast" id="toast"></div>
 `;
 
+// ============================================================================
+// Shared UI utilities
+// ============================================================================
+
 function setBusy(key, value) {
   state.busy[key] = value;
   render();
@@ -213,6 +225,10 @@ function allowedTabs() {
 function canAccessTab(tab) {
   return allowedTabs().has(tab);
 }
+
+// ============================================================================
+// Navigation and data refresh helpers
+// ============================================================================
 
 function navigateTo(tab, options = {}) {
   if (!VALID_TABS.has(tab) || !canAccessTab(tab)) {
@@ -404,6 +420,10 @@ function renderShellCopy() {
   });
 }
 
+// ============================================================================
+// Initial data loading and top-level render loop
+// ============================================================================
+
 async function loadInitialData() {
   try {
     const [demoAccounts, session, emails, categories, employees, rules, drafts, tasks, composeDrafts, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listDemoAccounts(), getDemoSession(), listEmails(), listCategories(), listEmployees(), listRules(), listDrafts(), listTasks(), listComposeDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
@@ -466,6 +486,10 @@ function render() {
   renderDemoSession();
 }
 
+// ============================================================================
+// Page renderers
+// ============================================================================
+
 function renderDashboard() {
   const openEmails = state.emails.filter((email) => email.status !== "Done").length;
   const digest = state.digest;
@@ -487,12 +511,12 @@ function renderDashboard() {
         <div class="caption">Human approval still required to send</div>
       </div>
     </div>
-    <div class="grid cols-2" style="margin-top:16px">
+    <div class="grid cols-2 stack-md">
       <div class="panel">
         <div class="panel-title"><h2>Morning digest</h2><span>${digest ? `Generated ${escapeHtml(digest.generatedAt)}` : "Loading..."}</span></div>
         <p class="subtitle">${digest ? escapeHtml(digest.headline) : "Preparing a local demo digest from mock emails and drafts."}</p>
         ${digest ? `
-          <table class="table" style="margin-top:14px">
+          <table class="table stack-sm">
             <tr><td>Urgent items</td><td>${digest.urgentItems.length ? escapeList(digest.urgentItems) : "None"}</td></tr>
             <tr><td>Invoices</td><td>${digest.invoices.length ? escapeList(digest.invoices) : "None"}</td></tr>
             <tr><td>Missing documents</td><td>${digest.missingDocuments.length ? escapeList(digest.missingDocuments) : "None"}</td></tr>
@@ -500,7 +524,7 @@ function renderDashboard() {
             <tr><td>Client complaints</td><td>${digest.clientComplaints.length ? escapeList(digest.clientComplaints) : "None"}</td></tr>
           </table>
         ` : ""}
-        <div class="actions" style="margin-top:14px">
+        <div class="actions stack-sm">
           <button class="btn primary" data-action="digest" ${isBusy("digest") ? "disabled" : ""}>${isBusy("digest") ? "Regenerating..." : "Regenerate digest"}</button>
           <button class="btn subtle" data-tab-target="triage">Review triage</button>
         </div>
@@ -530,8 +554,8 @@ function renderImport() {
       <div class="panel">
         <div class="panel-title"><h2>${escapeHtml(setup.status)}</h2><span>No account connected</span></div>
         <div class="preview">${escapeHtml(setup.safetyNote)}</div>
-        <div class="preview" style="margin-top:12px">${escapeHtml(setup.futureNote)}</div>
-        <div class="actions" style="margin-top:14px">
+        <div class="preview stack-xs">${escapeHtml(setup.futureNote)}</div>
+        <div class="actions stack-sm">
           <button class="btn primary" disabled title="Real OAuth/provider connection is intentionally unavailable in this fake/local prototype.">Connect demo only</button>
           <button class="btn subtle" data-tab-target="triage">Review local triage</button>
         </div>
@@ -551,7 +575,7 @@ function renderImport() {
       </div>
     </div>
 
-    <div class="grid cols-2" style="margin-top:16px">
+    <div class="grid cols-2 stack-md">
       <div class="panel">
         <div class="panel-title"><h2>${escapeHtml(selectedMailbox.name)} preview</h2><span>${escapeHtml(selectedMailbox.risk)}</span></div>
         <table class="table">
@@ -576,7 +600,7 @@ function renderImport() {
       </div>
     </div>
 
-    <div class="grid cols-2" style="margin-top:16px">
+    <div class="grid cols-2 stack-md">
       <div class="panel">
         <div class="panel-title"><h2>Simulated setup flow</h2><span>Fake progress</span></div>
         <div class="workflow">
@@ -600,7 +624,7 @@ function renderImport() {
             </tr>
           `).join("")}
         </table>
-        <div class="preview" style="margin-top:14px">These are local examples. Courio does not create mailbox rules or send email from this page.</div>
+        <div class="preview stack-sm">These are local examples. Courio does not create mailbox rules or send email from this page.</div>
       </div>
     </div>
   `;
@@ -646,14 +670,14 @@ function renderTriage() {
   document.querySelector("#triage").innerHTML = `
     <div class="panel">
       <div class="panel-title"><h2>Inbox triage</h2><span>${t("triage.inboxControl")}</span></div>
-      <div class="segmented" style="margin-bottom:14px">
+      <div class="segmented below-sm">
         ${[
           ["all", "All inbox"],
           ["urgent", "Urgent"],
           ["invoices", "Invoices"]
         ].map(([value, label]) => `<button class="${state.triageFilter === value ? "active" : ""}" data-triage-filter="${value}">${label}</button>`).join("")}
       </div>
-      <div class="list-toolbar" style="margin-bottom:14px">
+      <div class="list-toolbar below-sm">
         <select data-triage-category-filter aria-label="${t("triage.categoryFilter")}">
           <option value="all" ${state.triageCategoryFilter === "all" ? "selected" : ""}>${t("triage.allCategories")}</option>
           ${categoryOptions.map((category) => `<option value="${escapeHtml(category.name)}" ${state.triageCategoryFilter === category.name ? "selected" : ""}>${escapeHtml(category.name)}</option>`).join("")}
@@ -746,10 +770,10 @@ function renderTasks() {
         <div class="caption">${overdueCount ? t("tasks.overdueCaption") : t("tasks.noOverdueCaption")}</div>
       </div>
     </div>
-    <div class="panel" style="margin-top:16px">
+    <div class="panel stack-md">
       <div class="panel-title"><h2>${t("tasks.title")}</h2><span>${t("tasks.subtitle")}</span></div>
       ${isAdminSession() ? `
-        <div class="list-toolbar task-filters" style="margin-bottom:14px">
+        <div class="list-toolbar task-filters below-sm">
           <select data-task-assignee-filter aria-label="${t("tasks.assigneeFilter")}">
             <option value="all" ${state.taskAssigneeFilter === "all" ? "selected" : ""}>${t("tasks.allAssignees")}</option>
             <option value="unassigned" ${state.taskAssigneeFilter === "unassigned" ? "selected" : ""}>${t("tasks.unassigned")}</option>
@@ -762,8 +786,8 @@ function renderTasks() {
           </select>
         </div>
       ` : `
-        <div class="preview" style="margin-bottom:14px">${t("tasks.employeeScope")}</div>
-        <div class="list-toolbar task-filters" style="margin-bottom:14px">
+        <div class="preview below-sm">${t("tasks.employeeScope")}</div>
+        <div class="list-toolbar task-filters below-sm">
           <select data-task-follow-up-filter aria-label="${t("tasks.followUpFilter")}">
             <option value="all" ${state.taskFollowUpFilter === "all" ? "selected" : ""}>${t("tasks.allFollowUps")}</option>
             <option value="scheduled" ${state.taskFollowUpFilter === "scheduled" ? "selected" : ""}>${t("tasks.scheduledFollowUps")}</option>
@@ -805,7 +829,7 @@ function renderCompose() {
           <button class="btn subtle" data-new-compose>${t("compose.newMessage")}</button>
         </div>
         <div class="preview">${t("compose.safetyNote")}</div>
-        <div class="form-grid" style="margin-top:14px">
+        <div class="form-grid stack-sm">
           <label>${t("compose.to")}<input data-compose-field="to" type="email" value="${escapeHtml(form.to)}" placeholder="client@example.ca"></label>
           <label>${t("compose.cc")}<input data-compose-field="cc" value="${escapeHtml(form.cc)}" placeholder="optional@example.ca"></label>
           <label>${t("compose.subject")}<input data-compose-field="subject" value="${escapeHtml(form.subject)}"></label>
@@ -832,6 +856,10 @@ function renderCompose() {
     </div>
   `;
 }
+
+// ============================================================================
+// Drawer and modal renderers
+// ============================================================================
 
 function renderDrawer() {
   const root = document.querySelector("#drawerRoot");
@@ -1267,6 +1295,10 @@ function renderTaskDrawer(root) {
   `;
 }
 
+// ============================================================================
+// Secondary page renderers
+// ============================================================================
+
 function renderRules() {
   const query = state.ruleQuery.trim().toLowerCase();
   const filteredRules = state.rules.filter((rule) => !query || `${rule.title} ${rule.desc} ${rule.category}`.toLowerCase().includes(query));
@@ -1345,19 +1377,19 @@ function renderDrafts() {
   document.querySelector("#drafts").innerHTML = `
     <div class="panel">
       <div class="panel-title"><h2>Draft approval queue</h2><span>Human approval required</span></div>
-      <div class="segmented" style="margin-bottom:14px">
+      <div class="segmented below-sm">
         ${[
           ["all", "All drafts"],
           ["needs_approval", "Needs approval"],
           ["ready", "Ready"]
         ].map(([value, label]) => `<button class="${state.draftFilter === value ? "active" : ""}" data-draft-filter="${value}">${label}</button>`).join("")}
       </div>
-      <div class="actions" style="margin-bottom:14px">
+      <div class="actions below-sm">
         <button class="btn success" data-approve-selected ${selectedCount === 0 || isBusy("approve-selected") ? `disabled title="${selectedCount === 0 ? "Select at least one reviewed and saved draft." : ""}"` : ""}>${isBusy("approve-selected") ? "Approving..." : `Approve selected (${selectedCount})`}</button>
         <button class="btn subtle" data-approve-low-risk ${lowRiskDisabled || lowRiskPendingCount === 0 || isBusy("approve-low-risk") ? `disabled title="${lowRiskDisabled ? "Enable low-risk bulk approval in Advanced workspace settings." : lowRiskPendingCount === 0 ? "No reviewed low-risk drafts are ready for approval." : ""}"` : ""}>${lowRiskDisabled ? "Low-risk bulk approval disabled" : isBusy("approve-low-risk") ? "Approving..." : `Approve all low-risk (${lowRiskPendingCount})`}</button>
         <span class="mode">Approval completes the workflow; nothing is sent</span>
       </div>
-      ${lowRiskDisabled ? `<div class="preview" style="margin-bottom:14px">Low-risk bulk approval is disabled by workspace settings.</div>` : ""}
+      ${lowRiskDisabled ? `<div class="preview below-sm">Low-risk bulk approval is disabled by workspace settings.</div>` : ""}
       ${content}
     </div>
   `;
@@ -1371,6 +1403,10 @@ function renderAssistant() {
     assistantBusy: isBusy("assistant")
   });
 }
+
+// ============================================================================
+// Assistant command routing
+// ============================================================================
 
 async function submitAssistantCommand(message) {
   await runAction("assistant", async () => {
@@ -1435,6 +1471,10 @@ async function applyAssistantAction(action) {
     render();
   }
 }
+
+// ============================================================================
+// Admin and shared display helpers
+// ============================================================================
 
 function renderAdmin() {
   const formSettings = getSettingsForm();
@@ -1529,7 +1569,7 @@ function renderAdmin() {
                 `).join("")}
               </tbody>
             </table>`}
-        <div class="preview" style="margin-top:14px">Archiving hides a category from new dropdown choices. Existing emails and rules keep displaying safely.</div>
+        <div class="preview stack-sm">Archiving hides a category from new dropdown choices. Existing emails and rules keep displaying safely.</div>
       </div>
       <div class="panel">
         <div class="panel-title"><h2>Recent activity</h2><span>Local audit preview</span></div>
@@ -1556,6 +1596,10 @@ function badgeClass(label) {
   if (label === "Sales") return "lead";
   return "";
 }
+
+// ============================================================================
+// Event handlers: click, change, input, and submit
+// ============================================================================
 
 document.addEventListener("click", async (event) => {
   const target = event.target.closest("button");

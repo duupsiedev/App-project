@@ -1,3 +1,14 @@
+/* ==========================================================================
+   Courio visual layer
+
+   Human review guide:
+   - This file controls how Courio looks and responds to screen size.
+   - App behavior, workflow rules, fake API calls, and persistence should not
+     live here.
+   - Keep visual-only changes in this file when practical.
+   ========================================================================== */
+
+/* 1. Design tokens: shared colors, shadows, and surfaces. */
 :root {
   --bg: #f5f7fb;
   --surface: #fff;
@@ -16,6 +27,7 @@
   --shadow: 0 8px 24px rgba(16, 24, 40, .07);
 }
 
+/* 2. Base browser reset and typography. */
 * {
   box-sizing: border-box;
 }
@@ -35,6 +47,7 @@ textarea {
   font: inherit;
 }
 
+/* 3. App shell: sidebar, navigation, main page frame, and header. */
 .app {
   display: grid;
   grid-template-columns: 248px 1fr;
@@ -238,6 +251,7 @@ h1 {
   display: block;
 }
 
+/* 4. Layout primitives: reusable grids, panels, and spacing helpers. */
 .grid {
   display: grid;
   gap: 16px;
@@ -257,6 +271,22 @@ h1 {
   border-radius: 16px;
   padding: 18px;
   box-shadow: var(--shadow);
+}
+
+.stack-xs {
+  margin-top: 12px;
+}
+
+.stack-sm {
+  margin-top: 14px;
+}
+
+.stack-md {
+  margin-top: 16px;
+}
+
+.below-sm {
+  margin-bottom: 14px;
 }
 
 .panel-title {
@@ -297,6 +327,7 @@ h1 {
   color: var(--green);
 }
 
+/* 5. Shared controls: buttons, forms, tables, badges, and toggles. */
 .btn {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -584,6 +615,7 @@ textarea {
   background: var(--red);
 }
 
+/* 6. Shared feedback and workflow helpers. */
 .loading {
   color: var(--muted);
   padding: 18px 8px;
@@ -793,6 +825,7 @@ textarea {
   white-space: nowrap;
 }
 
+/* 7. Drawers and confirmation modals. */
 .drawer-backdrop {
   position: fixed;
   inset: 0;
@@ -926,6 +959,7 @@ textarea {
   line-height: 1.45;
 }
 
+/* 8. AI assistant bubble. */
 .assistant {
   position: fixed;
   right: 22px;
@@ -1037,6 +1071,7 @@ textarea {
   cursor: pointer;
 }
 
+/* 9. Responsive rules. */
 @media (max-width: 900px) {
   .app {
     grid-template-columns: 1fr;
