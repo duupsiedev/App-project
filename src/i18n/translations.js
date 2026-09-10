@@ -1,5 +1,8 @@
+import { redesignCopy } from "./redesignCopy.js";
+
 const translations = {
   en: {
+    design: redesignCopy.en,
     brand: {
       subtitle: "Email assistant for small businesses",
       asideNote: "Courio uses fake local mailbox data in this prototype and suggests actions. It never sends email or modifies a real mailbox.",
@@ -161,6 +164,7 @@ const translations = {
     }
   },
   fr: {
+    design: redesignCopy.fr,
     brand: {
       subtitle: "Assistant courriel pour PME",
       asideNote: "Courio utilise des données locales fictives dans ce prototype et suggère des actions. Il n'envoie jamais de courriel et ne modifie aucune vraie boîte courriel.",

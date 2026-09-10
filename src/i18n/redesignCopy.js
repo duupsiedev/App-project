@@ -1,0 +1,45 @@
+// Presentation copy only. API statuses and stored category values stay unchanged.
+export const redesignCopy = {
+  en: {
+    today: "Today", inbox: "Inbox", tasks: "Tasks", drafts: "Drafts",
+    compose: "New message", automation: "Automation", team: "Team & categories",
+    connection: "Connection", settings: "Settings", workspace: "Workspace",
+    ask: "Ask Courio...", hello: "Hello", attention: "Here is what needs your attention today.",
+    urgent: "urgent emails", pending: "drafts awaiting approval", openTasks: "tasks to complete",
+    start: "Start reviewing", next: "Next actions", urgentAction: "Review urgent messages",
+    draftAction: "Review drafts awaiting approval", taskAction: "Complete assigned tasks",
+    digest: "Morning digest", recommendations: "Recommendations", fullDigest: "View full digest",
+    general: "General", employees: "Team", categories: "Categories", activity: "Activity",
+    safety: "Demo safeguards", reset: "Reset demo data", search: "Search this list...",
+    noMatch: "No items match your search.", select: "Select an item to review its details.",
+    review: "Review", summary: "Courio summary", reason: "Why this priority?",
+    noSend: "Approval makes a draft ready for human send. This demo never sends email.",
+    local: "Local demo", details: "Details", close: "Close", more: "More details",
+    edit: "Review and edit", saved: "Saved drafts", account: "Demo account",
+    itemCount: "items", filters: "Filters", status: "Status", source: "Source",
+    subject: "Subject", sender: "Sender", category: "Category", assigned: "Assigned to",
+    workflow: "Workflow", risk: "Risk", notes: "Notes", priority: "Priority", done: "Complete",
+    toggleMenu: "Toggle navigation", clearSearch: "Clear the list search before removing filtered emails."
+  },
+  fr: {
+    today: "Aujourd'hui", inbox: "Boîte de réception", tasks: "Tâches", drafts: "Brouillons",
+    compose: "Nouveau message", automation: "Automatisation", team: "Équipe et catégories",
+    connection: "Connexion", settings: "Paramètres", workspace: "Espace de travail",
+    ask: "Demander à Courio...", hello: "Bonjour", attention: "Voici ce qui demande votre attention aujourd'hui.",
+    urgent: "courriels urgents", pending: "brouillons à approuver", openTasks: "tâches à compléter",
+    start: "Commencer la révision", next: "Prochaines actions", urgentAction: "Examiner les messages urgents",
+    draftAction: "Réviser les brouillons en attente", taskAction: "Compléter les tâches assignées",
+    digest: "Résumé du matin", recommendations: "Recommandations", fullDigest: "Voir le résumé complet",
+    general: "Général", employees: "Équipe", categories: "Catégories", activity: "Activité",
+    safety: "Garanties de la démo", reset: "Réinitialiser les données de démonstration", search: "Rechercher dans cette liste...",
+    noMatch: "Aucun élément ne correspond à votre recherche.", select: "Sélectionnez un élément pour consulter ses détails.",
+    review: "Réviser", summary: "Résumé par Courio", reason: "Pourquoi cette priorité?",
+    noSend: "L'approbation prépare un brouillon pour un envoi humain. Cette démo n'envoie jamais de courriel.",
+    local: "Démo locale", details: "Détails", close: "Fermer", more: "Plus de détails",
+    edit: "Réviser et modifier", saved: "Brouillons enregistrés", account: "Compte de démonstration",
+    itemCount: "éléments", filters: "Filtres", status: "Statut", source: "Source",
+    subject: "Objet", sender: "Expéditeur", category: "Catégorie", assigned: "Assigné à",
+    workflow: "Flux de travail", risk: "Risque", notes: "Notes", priority: "Priorité", done: "Terminer",
+    toggleMenu: "Afficher ou masquer la navigation", clearSearch: "Effacez la recherche avant de retirer les courriels filtrés."
+  }
+};

@@ -1,4 +1,6 @@
 import "./styles.css";
+import "./styles/redesign.css";
+import { applyWorkspaceLayout } from "./ui/workspaceLayout.js";
 import { createTranslator, getPageCopy, normalizeLanguage } from "./i18n/translations.js";
 import { renderAssistantView } from "./ui/assistantView.js";
 import { escapeHtml, escapeList } from "./ui/helpers.js";
@@ -484,6 +486,7 @@ function render() {
   renderConfirmModal();
   renderAssistant();
   renderDemoSession();
+  applyWorkspaceLayout({ state, t, canAccessTab, navigateTo });
 }
 
 // ============================================================================
