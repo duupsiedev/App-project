@@ -106,6 +106,9 @@ main { padding: 0 40px 36px; max-width: none; min-width: 0; }
 .work-queue > .panel, #tasks > .panel { padding: 0; border: 0; box-shadow: none; background: transparent; }
 .work-queue .panel-title { margin-bottom: 16px; }
 .work-queue > .panel > .panel-title { display: none; }
+#tasks.work-queue > .panel > .panel-title { display: flex; }
+[data-task-editor] textarea { min-height: 120px; }
+.task-history-list p { overflow-wrap: anywhere; white-space: pre-wrap; }
 .work-queue .list-toolbar { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .work-queue .list-toolbar select { max-width: 300px; }
 .queue-workspace { display: grid; grid-template-columns: minmax(260px, .75fr) minmax(0, 1.1fr); gap: 24px; align-items: start; }

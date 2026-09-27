@@ -1,7 +1,9 @@
 import { redesignCopy } from "./redesignCopy.js";
+import { taskCopy } from "./taskCopy.js";
 
 const translations = {
   en: {
+    taskWork: taskCopy.en,
     design: redesignCopy.en,
     brand: {
       subtitle: "Email assistant for small businesses",
@@ -164,6 +166,7 @@ const translations = {
     }
   },
   fr: {
+    taskWork: taskCopy.fr,
     design: redesignCopy.fr,
     brand: {
       subtitle: "Assistant courriel pour PME",

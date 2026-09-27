@@ -356,6 +356,7 @@ function normalizeTask(task) {
     assignedTo: task.assignedTo || "",
     status: task.status === "Done" ? "Done" : "Open",
     notes: task.notes || "",
+    dueAt: task.dueAt || null,
     followUp: {
       enabled: followUpEnabled,
       dueAt: followUpEnabled ? followUp.dueAt : null,
@@ -654,7 +655,7 @@ function syncTasksFromEmails() {
       title: task.title || email.suggestedAction,
       description: task.description || email.summary || email.explanation,
       priority: task.priority || taskPriorityForEmail(email),
-      assignedTo: task.assignedTo || email.assignedTo || "",
+      assignedTo: task.assignedTo,
       category: email.category
     });
   });
@@ -681,8 +682,11 @@ function buildTaskView(task) {
     historySummary: {
       count: history.length,
       latestLabel: latestHistory?.label || "",
+      latestAction: latestHistory?.action || null,
       latestAt: latestHistory?.at || null
     },
+    history: history.map(entry => ({ ...entry, canRestore: Boolean(entry.before)
+      && (!isEmployeeSession() || (task.assignedTo === sessionEmployeeId() && !Object.hasOwn(entry.before, "assignedTo"))) })),
     assignedEmployee: assignedEmployee ? clone(assignedEmployee) : null,
     sourceEmail: email ? buildEmailView(email) : null,
     hiddenFromInbox: Boolean(email?.archivedAt),
@@ -1435,55 +1439,109 @@ export async function archiveEmails(ids, reason = "Removed from demo inbox") {
   return clone(archived.map(buildEmailView));
 }
 
+function taskError(code) {
+  const error = new Error(code);
+  error.code = code;
+  return error;
+}
+
+function validateTaskChanges(updates) {
+  const changes = {};
+  for (const field of ["title", "notes", "priority", "status", "assignedTo", "dueAt"]) {
+    if (Object.hasOwn(updates, field)) changes[field] = updates[field];
+  }
+  if ("title" in changes) {
+    changes.title = String(changes.title || "").trim();
+    if (!changes.title) throw taskError("titleRequired");
+  }
+  if ("notes" in changes) changes.notes = String(changes.notes || "").trim();
+  if ("priority" in changes && !["High", "Medium", "Low"].includes(changes.priority)) throw taskError("invalidPriority");
+  if ("status" in changes && !["Open", "Done"].includes(changes.status)) throw taskError("invalidStatus");
+  if ("assignedTo" in changes && changes.assignedTo && !state.employees.some(employee => employee.id === changes.assignedTo)) throw taskError("invalidAssignee");
+  if ("dueAt" in changes) {
+    changes.dueAt = changes.dueAt || null;
+    if (changes.dueAt && (!/^\d{4}-\d{2}-\d{2}$/.test(changes.dueAt)
+      || Number.isNaN(Date.parse(changes.dueAt))
+      || new Date(changes.dueAt).toISOString().slice(0, 10) !== changes.dueAt)) throw taskError("invalidDate");
+  }
+  return changes;
+}
+
+function taskForUpdate(id) {
+  const task = state.tasks.find(item => item.id === id);
+  if (!task) throw taskError("notFound");
+  if (isEmployeeSession() && task.assignedTo !== sessionEmployeeId()) throw taskError("forbidden");
+  return task;
+}
+
+// Store only changed fields: recovery never rewinds unrelated email/workflow data.
+function applyTaskChanges(task, changes, action = "updated", restoredEntryId = null) {
+  const before = {};
+  for (const [field, value] of Object.entries(changes)) {
+    if (task[field] !== value) before[field] = task[field] ?? null;
+  }
+  if (!Object.keys(before).length) return;
+  const now = new Date().toISOString();
+  Object.assign(task, changes);
+  task.completedAt = task.status === "Done" ? task.completedAt || now : null;
+  task.updatedAt = now;
+  task.history.push({
+    id: crypto.randomUUID(), at: now, action, before,
+    restoredEntryId, label: action === "restored" ? "Task change restored" : "Task updated"
+  });
+  recordActivity(action === "restored" ? "task-restored" : changes.status === "Done" ? "task-completed" : "task-updated", {
+    taskId: task.id, emailId: task.emailId, label: `Task ${action}: ${task.title}`
+  });
+}
+
+export async function createTask(input = {}) {
+  await delay(400);
+  const changes = validateTaskChanges({
+    title: input.title, notes: input.notes || "", priority: input.priority || "Medium",
+    dueAt: input.dueAt, assignedTo: input.assignedTo ?? sessionEmployeeId()
+  });
+  if (isEmployeeSession() && changes.assignedTo !== sessionEmployeeId()) throw taskError("forbidden");
+  const task = normalizeTask({ ...changes, id: `task-${crypto.randomUUID()}` });
+  task.history.push({ id: crypto.randomUUID(), at: task.createdAt, action: "created", label: "Task created" });
+  state.tasks.push(task);
+  recordActivity("task-created", { taskId: task.id, label: `Task created: ${task.title}` });
+  persistState();
+  return clone(buildTaskView(task));
+}
+
+export async function getOrCreateEmailTask(emailId) {
+  await delay(300);
+  const email = findEmail(emailId);
+  if (isEmployeeSession() && email.assignedTo !== sessionEmployeeId()) throw taskError("forbidden");
+  let task = state.tasks.find(item => item.emailId === emailId);
+  if (task && isEmployeeSession() && task.assignedTo !== sessionEmployeeId()) throw taskError("forbidden");
+  if (!task) {
+    task = createTaskFromEmail(email);
+    state.tasks.push(task);
+    persistState();
+  }
+  return clone(buildTaskView(task));
+}
+
+export async function restoreTaskChange(id, historyId) {
+  await delay(300);
+  const task = taskForUpdate(id);
+  const entry = task.history.find(item => item.id === historyId);
+  if (!entry?.before) throw taskError("noSnapshot");
+  if (isEmployeeSession() && Object.hasOwn(entry.before, "assignedTo")) throw taskError("forbidden");
+  const changes = validateTaskChanges(entry.before);
+  applyTaskChanges(task, changes, "restored", historyId);
+  persistState();
+  return clone(buildTaskView(task));
+}
+
 export async function updateTask(id, updates = {}) {
   await delay(400);
   syncTasksFromEmails();
-  const task = state.tasks.find((item) => item.id === id);
-  if (!task) throw new Error("Task not found.");
-  if (isEmployeeSession() && task.assignedTo !== sessionEmployeeId()) {
-    throw new Error("This demo employee can only update assigned tasks.");
-  }
-
-  const wasDone = task.status === "Done";
-  const now = new Date().toISOString();
-  if (updates.assignedTo !== undefined) {
-    if (isEmployeeSession()) throw new Error("Only the demo admin can reassign tasks.");
-    if (updates.assignedTo) findEmployee(updates.assignedTo);
-    task.assignedTo = updates.assignedTo;
-    task.history = [
-      ...(task.history || []),
-      {
-        at: now,
-        label: updates.assignedTo
-          ? `Assigned to ${findEmployee(updates.assignedTo).name}`
-          : "Returned to Unassigned"
-      }
-    ];
-  }
-  if (updates.notes !== undefined) {
-    task.notes = String(updates.notes).trim();
-  }
-  if (updates.status !== undefined) {
-    task.status = updates.status === "Done" ? "Done" : "Open";
-    task.completedAt = task.status === "Done" ? task.completedAt || now : null;
-    task.history = [
-      ...(task.history || []),
-      {
-        at: now,
-        label: task.status === "Done" ? "Marked complete" : "Reopened"
-      }
-    ];
-  }
-  task.updatedAt = now;
-
-  if (!wasDone && task.status === "Done") {
-    recordActivity("task-completed", {
-      taskId: task.id,
-      emailId: task.emailId,
-      label: `Task completed: ${task.title}`
-    });
-  }
-
+  const task = taskForUpdate(id);
+  const changes = validateTaskChanges(updates);
+  if (isEmployeeSession() && Object.hasOwn(changes, "assignedTo")) throw taskError("forbidden");
+  applyTaskChanges(task, changes);
   persistState();
   return clone(buildTaskView(task));
 }
@@ -1595,15 +1653,7 @@ export async function assignEmail(id, employeeId) {
   email.assignedTo = employeeId;
   const task = state.tasks.find((item) => item.emailId === id);
   if (task) {
-    task.assignedTo = employeeId;
-    task.updatedAt = new Date().toISOString();
-    task.history = [
-      ...(task.history || []),
-      {
-        at: task.updatedAt,
-        label: employeeId ? `Assigned from email to ${findEmployee(employeeId).name}` : "Returned to Unassigned from email"
-      }
-    ];
+    applyTaskChanges(task, { assignedTo: employeeId });
   }
   persistState();
   return clone(email);

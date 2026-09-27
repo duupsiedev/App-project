@@ -1,6 +1,7 @@
 import "./styles.css";
 import "./styles/redesign.css";
 import { applyWorkspaceLayout } from "./ui/workspaceLayout.js";
+import { renderTaskEditor } from "./ui/taskEditor.js";
 import { createTranslator, getPageCopy, normalizeLanguage } from "./i18n/translations.js";
 import { renderAssistantView } from "./ui/assistantView.js";
 import { escapeHtml, escapeList } from "./ui/helpers.js";
@@ -46,6 +47,9 @@ import {
   updateRule,
   updateEmailCategory,
   updateTask,
+  createTask,
+  getOrCreateEmailTask,
+  restoreTaskChange,
   updateTaskFollowUp,
   logoutDemoSession
 } from "./api/mockApi.js";
@@ -90,6 +94,7 @@ const state = {
   selectedRule: null,
   selectedEmployee: null,
   selectedTask: null,
+  taskEditor: null,
   selectedDraftIds: [],
   confirmDialog: null,
   digest: null,
@@ -191,7 +196,7 @@ async function runAction(key, action, successMessage) {
     await action();
     if (successMessage) toast(successMessage);
   } catch (error) {
-    toast(error.message || "Something went wrong in the mock workflow.", true);
+    toast(error.code ? t(`taskWork.${error.code}`) : error.message || "Something went wrong in the mock workflow.", true);
   } finally {
     setBusy(key, false);
   }
@@ -250,6 +255,8 @@ function navigateTo(tab, options = {}) {
   if (options.draftFilter) state.draftFilter = options.draftFilter;
 
   if (options.closeDrawers !== false) {
+    state.taskEditor = null;
+    state.selectedTask = null;
     state.selectedEmail = null;
     state.selectedCategory = null;
     state.selectedDraft = null;
@@ -294,6 +301,8 @@ async function refreshCategoryState(keepSelectedId = state.selectedCategory?.id)
 }
 
 async function refreshWorkspaceForSession() {
+  state.taskEditor = null;
+  state.selectedTask = null;
   const [session, emails, tasks, drafts, composeDrafts, digest, activity] = await Promise.all([
     getDemoSession(),
     listEmails(),
@@ -717,9 +726,10 @@ function renderTasks() {
               <td>
                 <strong>${escapeHtml(task.title)}</strong><br>
                 <small>${escapeHtml(task.description)}</small>
+                ${task.dueAt ? `<p>${t("taskWork.dueAt")}: ${escapeHtml(task.dueAt)}</p>` : ""}
                 ${task.historySummary?.latestLabel ? `
                   <div class="task-history-summary">
-                    <span>${t("tasks.latestActivity")}:</span> ${escapeHtml(task.historySummary.latestLabel)}
+                    <span>${t("tasks.latestActivity")}:</span> ${escapeHtml(task.historySummary.latestAction ? t(`taskWork.${task.historySummary.latestAction}`) : task.historySummary.latestLabel)}
                     ${task.historySummary.latestAt ? `<small>${escapeHtml(formatLocalDateTime(task.historySummary.latestAt))}</small>` : ""}
                   </div>
                 ` : ""}
@@ -748,6 +758,7 @@ function renderTasks() {
               <td class="actions">
                 ${task.sourceEmail ? `<button class="btn subtle" data-review-email="${task.sourceEmail.id}">${t("tasks.reviewEmail")}</button>` : ""}
                 <button class="btn subtle" data-review-task="${task.id}">${t("tasks.viewHistory")}</button>
+                <button class="btn subtle" data-edit-task="${task.id}">${t("taskWork.edit")}</button>
                 <button class="btn subtle" data-save-task-note="${task.id}" ${isBusy(`task-note-${task.id}`) ? "disabled" : ""}>${isBusy(`task-note-${task.id}`) ? t("tasks.saving") : t("tasks.saveNote")}</button>
               </td>
             </tr>
@@ -774,7 +785,7 @@ function renderTasks() {
       </div>
     </div>
     <div class="panel stack-md">
-      <div class="panel-title"><h2>${t("tasks.title")}</h2><span>${t("tasks.subtitle")}</span></div>
+      <div class="panel-title"><h2>${isEmployeeSession() ? t("taskWork.myTasks") : t("tasks.title")}</h2><button class="btn primary" data-add-task>${t("taskWork.add")}</button></div>
       ${isAdminSession() ? `
         <div class="list-toolbar task-filters below-sm">
           <select data-task-assignee-filter aria-label="${t("tasks.assigneeFilter")}">
@@ -866,6 +877,10 @@ function renderCompose() {
 
 function renderDrawer() {
   const root = document.querySelector("#drawerRoot");
+  if (state.taskEditor) {
+    renderTaskEditor(root, state.taskEditor, state.employees, isAdminSession(), t);
+    return;
+  }
   if (state.selectedCategory) {
     renderCategoryDrawer(root);
     return;
@@ -970,6 +985,7 @@ function renderDrawer() {
       ${state.summary ? `<div class="drawer-section"><h3>Summary</h3><div class="preview">${escapeHtml(state.summary)}</div></div>` : ""}
       <div class="drawer-actions">
         <button class="btn primary" data-summary-email="${email.id}" ${isBusy(`summary-${email.id}`) ? "disabled" : ""}>${isBusy(`summary-${email.id}`) ? "Summarizing..." : "Summarize"}</button>
+        <button class="btn subtle" data-email-task="${email.id}">${t("taskWork.emailTask")}</button>
         ${email.canOpenDraft ? `<button class="btn subtle" data-open-email-draft="${email.id}" ${isBusy(`open-email-draft-${email.id}`) ? "disabled" : ""}>${email.draftActionLabel}</button>` : `<button class="btn subtle" data-generate-draft="${email.id}" ${!email.canGenerateDraft || isBusy(`draft-${email.id}`) ? `disabled title="${email.completionBlocker || "Draft action is unavailable."}"` : ""}>${isBusy(`draft-${email.id}`) ? "Drafting..." : email.draftActionLabel}</button>`}
         <button class="btn subtle" data-archive-email="${email.id}" ${!email.canArchive || isBusy(`archive-${email.id}`) ? `disabled title="${escapeHtml(email.archiveBlocker || "Remove this fake/local email from the demo inbox.")}"` : ""}>${isBusy(`archive-${email.id}`) ? t("triage.removing") : t("triage.remove")}</button>
         ${emailDone
@@ -996,7 +1012,7 @@ function renderConfirmModal() {
       <p>${escapeHtml(dialog.message)}</p>
       <div class="actions">
         <button class="btn ${dialog.tone === "danger" ? "danger" : "primary"}" data-confirm-primary>${escapeHtml(dialog.primaryLabel)}</button>
-        <button class="btn subtle" data-confirm-cancel>Cancel</button>
+        <button class="btn subtle" data-confirm-cancel>${t("taskWork.cancel")}</button>
       </div>
     </div>
   `;
@@ -1246,6 +1262,15 @@ function renderEmployeeDrawer(root) {
   `;
 }
 
+function taskRestoreSummary(values) {
+  return Object.entries(values).map(([field, value]) => {
+    const display = field === "assignedTo"
+      ? state.employees.find(employee => employee.id === value)?.name || (value || t("tasks.unassigned"))
+      : ["priority", "status"].includes(field) ? t(`taskWork.${value}`) : value || t("taskWork.none");
+    return `${t(`taskWork.${field}`)}: ${display}`;
+  }).join("; ");
+}
+
 function renderTaskDrawer(root) {
   const task = state.selectedTask;
   const history = Array.isArray(task.history) ? task.history : [];
@@ -1277,8 +1302,10 @@ function renderTaskDrawer(root) {
         ${history.length
           ? `<ol class="task-history-list">${history.map((item) => `
               <li>
-                <strong>${escapeHtml(item.label || t("tasks.historyFallback"))}</strong>
+                <strong>${escapeHtml(item.action ? t(`taskWork.${item.action}`) : item.label || t("tasks.historyFallback"))}</strong>
                 ${item.at ? `<time>${escapeHtml(formatLocalDateTime(item.at))}</time>` : ""}
+                ${item.before ? `<p>${escapeHtml(taskRestoreSummary(item.before))}</p>` : ""}
+                ${item.canRestore ? `<button class="btn subtle" data-restore-task="${task.id}" data-history-id="${escapeHtml(item.id)}">${t("taskWork.restore")}</button>` : !item.before && !item.action ? `<small>${t("taskWork.legacy")}</small>` : ""}
               </li>
             `).join("")}</ol>`
           : `<div class="empty-state">${t("tasks.noHistory")}</div>`}
@@ -1608,6 +1635,33 @@ document.addEventListener("click", async (event) => {
   const target = event.target.closest("button");
   if (!target) return;
 
+  if (target.dataset.closeDrawer !== undefined) state.taskEditor = null;
+  if (target.dataset.addTask !== undefined || target.dataset.editTask) {
+    state.taskEditor = target.dataset.editTask ? { ...state.tasks.find(task => task.id === target.dataset.editTask) } : {};
+    state.selectedEmail = null;
+    state.selectedTask = null;
+    render();
+    return;
+  }
+  if (target.dataset.emailTask) {
+    await runAction("email-task", async () => {
+      state.taskEditor = await getOrCreateEmailTask(target.dataset.emailTask);
+      state.selectedEmail = null;
+      state.tasks = await listTasks();
+    });
+    return;
+  }
+  if (target.dataset.restoreTask) {
+    const task = state.tasks.find(item => item.id === target.dataset.restoreTask);
+    const entry = task?.history.find(item => item.id === target.dataset.historyId);
+    if (!entry?.canRestore) return;
+    state.confirmDialog = { type: "restore-task", taskId: task.id, historyId: entry.id,
+      title: t("taskWork.restoreTitle"), message: `${t("taskWork.restoreMessage")} ${taskRestoreSummary(entry.before)}`,
+      primaryLabel: t("taskWork.restore") };
+    render();
+    return;
+  }
+
   if (target.dataset.assistantToggle !== undefined) {
     state.assistantOpen = !state.assistantOpen;
     render();
@@ -1628,6 +1682,16 @@ document.addEventListener("click", async (event) => {
   if (target.dataset.confirmPrimary !== undefined) {
     const dialog = state.confirmDialog;
     state.confirmDialog = null;
+
+    if (dialog?.type === "restore-task") {
+      await runAction("restore-task", async () => {
+        await restoreTaskChange(dialog.taskId, dialog.historyId);
+        state.tasks = await listTasks();
+        state.selectedTask = state.tasks.find(task => task.id === dialog.taskId) || null;
+        state.activity = await listActivity();
+      }, t("taskWork.restored"));
+      return;
+    }
 
     if (dialog?.type === "reset-demo") {
       await runAction("reset-demo", async () => {
@@ -2133,7 +2197,7 @@ document.addEventListener("change", async (event) => {
 
   if (target.dataset.taskAssigneeFilter !== undefined) {
     state.taskAssigneeFilter = target.value;
-    renderTasks();
+    render();
     return;
   }
 
@@ -2159,7 +2223,7 @@ document.addEventListener("change", async (event) => {
 
   if (target.dataset.taskFollowUpFilter !== undefined) {
     state.taskFollowUpFilter = target.value;
-    renderTasks();
+    render();
     return;
   }
 
@@ -2240,6 +2304,26 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  const taskForm = event.target.closest("[data-task-editor]");
+  if (taskForm) {
+    event.preventDefault();
+    if (isBusy("save-task")) return;
+    const values = Object.fromEntries(new FormData(taskForm));
+    const id = state.taskEditor?.id;
+    state.taskEditor = { ...state.taskEditor, ...values };
+    await runAction("save-task", async () => {
+      if (id) await updateTask(id, values);
+      else await createTask(values);
+      state.tasks = await listTasks();
+      state.activity = await listActivity();
+      state.taskEditor = null;
+      state.selectedTask = null;
+      state.taskAssigneeFilter = "all";
+      state.taskFollowUpFilter = "all";
+      navigateTo("tasks");
+    }, t("taskWork.saved"));
+    return;
+  }
   const form = event.target.closest(".assistant-form");
   if (!form) return;
   event.preventDefault();
