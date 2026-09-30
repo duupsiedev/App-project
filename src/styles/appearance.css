@@ -1,0 +1,92 @@
+/* Personal appearance: theme tokens, background treatment, preference controls.
+ * Saved values and per-account ownership are handled by mockApi.js.
+ */
+:root { color-scheme: light; --background-rgb: 248 249 251; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111318;
+  --surface: #1c1f25;
+  --surface2: #252931;
+  --border: #454b57;
+  --text: #f0f2f7;
+  --muted: #b8c0cd;
+  --blue: #99bdff;
+  --blue2: #253653;
+  --green: #a0dc8d;
+  --green2: #203627;
+  --red: #ffaaaa;
+  --red2: #44282d;
+  --amber: #f4d282;
+  --amber2: #3c3421;
+  --shadow: 0 2px 5px #0003;
+  --background-rgb: 17 19 24;
+}
+
+/* Keep reading surfaces opaque, with the image visible in workspace margins. */
+.has-personal-background .app > main { position: relative; isolation: isolate; }
+.has-personal-background .app > main::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background-image: linear-gradient(rgb(var(--background-rgb) / var(--image-shading)), rgb(var(--background-rgb) / var(--image-shading))), var(--personal-background);
+  background-position: center; background-size: cover; background-attachment: fixed;
+}
+[data-theme="dark"] .workspace-topbar,
+[data-theme="dark"] .overview-metric,
+[data-theme="dark"] .next-actions,
+[data-theme="dark"] .digest-surface,
+[data-theme="dark"] .recommendations-surface,
+[data-theme="dark"] .queue-list,
+[data-theme="dark"] .queue-detail,
+[data-theme="dark"] .settings-nav,
+[data-theme="dark"] .drawer-actions { background: var(--surface); }
+[data-theme="dark"] .queue-entry.active,
+[data-theme="dark"] .settings-nav .active { background: var(--blue2); border-color: #6389ca; }
+[data-theme="dark"] .reason-surface { background: var(--surface2); border-color: var(--border); }
+[data-theme="dark"] .email-body,
+[data-theme="dark"] .reason-surface p,
+[data-theme="dark"] .inline-review .review-email-body { color: var(--text); }
+[data-theme="dark"] .btn.primary,
+[data-theme="dark"] .nav .nav-compose,
+[data-theme="dark"] .record-actions .btn:first-child,
+[data-theme="dark"] .assistant-fab,
+[data-theme="dark"] .assistant-message.user { background: #1757d9; border-color: #5086ef; color: #fff; }
+[data-theme="dark"] .btn.primary:hover:not(:disabled),
+[data-theme="dark"] .nav .nav-compose:hover { background: #2366ea; }
+[data-theme="dark"] .avatar { background: var(--blue2); color: var(--blue); }
+[data-theme="dark"] .queue-entry:nth-child(3n) .avatar { background: var(--green2); color: var(--green); }
+[data-theme="dark"] .queue-entry:nth-child(4n) .avatar { background: var(--amber2); color: var(--amber); }
+[data-theme="dark"] .auth-overlay { background: #111318ed; }
+[data-theme="dark"] .toggle { background: #626b7c; }
+[data-theme="dark"] .toggle.on { background: #1757d9; }
+[data-theme="dark"] input[type="checkbox"], [data-theme="dark"] input[type="radio"] { accent-color: #649aff; }
+[data-theme="dark"] .toast.error { background: #922f39; }
+
+/* Preferences use the existing workspace layout, with unframed form sections. */
+.preferences-form { max-width: 1000px; }
+.preferences-section { min-width: 0; border: 0; border-top: 1px solid var(--border); padding: 24px 0; margin: 0; }
+.preferences-section legend { font-size: 18px; font-weight: 600; padding: 0 16px 0 0; }
+.theme-options { display: flex; flex-wrap: wrap; gap: 12px; }
+.theme-options label { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; }
+.theme-options label:has(input:checked) { border-color: var(--blue); background: var(--blue2); }
+.theme-options span, [data-upload-icon] { display: inline-flex; gap: 8px; align-items: center; }
+.background-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.background-preview { position: relative; isolation: isolate; min-width: 0; aspect-ratio: 16 / 9; display: grid; place-items: center; background: var(--surface2) center / cover; border: 1px solid var(--border); border-radius: 8px; }
+.background-preview::before { content: ""; position: absolute; inset: 0; z-index: -1; background: rgb(var(--background-rgb) / var(--image-shading)); border-radius: inherit; }
+.background-controls small { color: var(--muted); line-height: 1.5; }
+.image-picker input { width: 100%; }
+.preferences-section > .subtitle { margin-bottom: 18px; }
+.preference-category { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; align-items: center; gap: 18px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.preference-category .badge { justify-self: start; overflow-wrap: anywhere; }
+.visibility-choice { display: flex; align-items: center; gap: 8px; line-height: 1.4; }
+.visibility-choice input { width: 18px; height: 18px; flex-shrink: 0; }
+.color-controls { display: flex; align-items: center; gap: 8px; }
+.color-controls input[type="color"] { width: 40px; height: 40px; padding: 3px; cursor: pointer; }
+.icon-button { width: 40px; height: 40px; padding: 8px; }
+.preferences-actions { padding: 20px 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 620px) {
+  .background-controls { grid-template-columns: minmax(0, 1fr); }
+  .preference-category { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+  .visibility-choice { grid-column: 1; grid-row: 2; }
+  .color-controls { grid-column: 2; grid-row: 1 / 3; }
+  .preferences-actions .btn { width: 100%; }
+}

@@ -21,8 +21,8 @@ try {
   console.log(await page.locator(".auth-grid").innerText());
   await page.locator("[data-login-account]").first().click();
   await page.locator(".auth-overlay").waitFor({ state: "hidden" });
-  assert.equal(await page.locator(".nav button:visible").count(), 9, "All admin destinations remain available");
-  for (const tab of ["dashboard", "triage", "tasks", "drafts", "compose", "rules", "import", "admin"]) {
+  assert.equal(await page.locator(".nav button:visible").count(), 10, "All admin destinations remain available");
+  for (const tab of ["dashboard", "triage", "tasks", "drafts", "compose", "rules", "import", "admin", "preferences"]) {
     await page.locator(`[data-destination="${tab}"]`).last().click();
     await page.locator(`#${tab}.active`).waitFor();
     assert.equal(await page.locator(`#${tab}`).isVisible(), true);
@@ -109,7 +109,7 @@ try {
   assert.equal(await page.locator('#pageTitle').innerText(), "Paramètres");
   await page.screenshot({ path: '.courio-review/admin-french-desktop.png' });
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const tab of ["dashboard", "triage", "tasks", "drafts", "compose", "rules", "import", "admin"]) {
+  for (const tab of ["dashboard", "triage", "tasks", "drafts", "compose", "rules", "import", "admin", "preferences"]) {
     await page.locator(".mobile-menu").click();
     await page.locator(`[data-destination="${tab}"]`).last().click();
     await page.screenshot({ path: `.courio-review/${tab}-mobile.png` });
@@ -119,7 +119,7 @@ try {
   await page.locator('[data-login-account]').nth(1).click();
   await page.locator('.auth-overlay').waitFor({ state: 'hidden' });
   await page.locator('.mobile-menu').click();
-  assert.equal(await page.locator('.nav button:visible').count(), 3, 'Employee destinations remain restricted');
+  assert.equal(await page.locator('.nav button:visible').count(), 4, 'Employee destinations include personal preferences but exclude Admin');
   assert.equal(await page.locator('[data-destination="admin"]').first().isVisible(), false);
   await page.screenshot({ path: '.courio-review/employee-mobile.png' });
   assert.deepEqual(externalRequests, [], "App makes no external service requests");

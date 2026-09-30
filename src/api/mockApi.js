@@ -141,6 +141,7 @@ const defaultState = {
   drafts: [],
   tasks: [],
   composeDrafts: [],
+  preferencesByAccount: {},
   settings: {
     productName: "Courio",
     mode: "Simple",
@@ -244,6 +245,9 @@ function migrateState(parsed) {
     drafts,
     tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(normalizeTask) : [],
     composeDrafts: Array.isArray(parsed.composeDrafts) ? parsed.composeDrafts.map(normalizeComposeDraft) : [],
+    preferencesByAccount: Object.fromEntries(DEMO_ACCOUNTS.map(account => [
+      account.id, normalizePreferences(parsed.preferencesByAccount?.[account.id])
+    ])),
     settings: {
       ...defaultState.settings,
       ...(parsed.settings || {})
@@ -1174,6 +1178,71 @@ export async function getDraftForEmail(emailId) {
   const draft = findDraftByEmailId(emailId);
   if (!draft) return null;
   return getDraftDetail(draft.id);
+}
+
+// Personal appearance is independent of shared settings and workflow contracts.
+function preferenceError(key) {
+  const error = new Error(key);
+  error.translationKey = `preferences.${key}`;
+  return error;
+}
+
+function validBackgroundImage(value) {
+  if (value === null) return true;
+  if (typeof value !== "string" || value.length > 700000) return false;
+  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match) return false;
+  try {
+    const bytes = atob(match[2]);
+    if (match[1] === "png") return bytes.startsWith("\x89PNG\r\n\x1a\n");
+    if (match[1] === "jpeg") return bytes.startsWith("\xff\xd8\xff");
+    return bytes.startsWith("RIFF") && bytes.slice(8, 12) === "WEBP";
+  } catch { return false; }
+}
+
+function normalizePreferences(input = {}) {
+  const value = input && typeof input === "object" ? input : {};
+  return {
+    theme: ["light", "dark", "system"].includes(value.theme) ? value.theme : "light",
+    backgroundImage: validBackgroundImage(value.backgroundImage) ? value.backgroundImage : null,
+    backgroundDim: Number.isInteger(value.backgroundDim) && value.backgroundDim >= 50 && value.backgroundDim <= 95 ? value.backgroundDim : 80,
+    labelColors: Object.fromEntries(Object.entries(value.labelColors || {}).filter(([id, color]) =>
+      /^[a-zA-Z0-9_-]+$/.test(id) && typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color))),
+    hiddenCategoryIds: Array.isArray(value.hiddenCategoryIds) ? [...new Set(value.hiddenCategoryIds.filter(id => typeof id === "string"))] : []
+  };
+}
+
+export async function getPersonalPreferences() {
+  return clone(normalizePreferences(state.preferencesByAccount?.[demoSession?.id]));
+}
+
+export async function savePersonalPreferences(input = {}) {
+  const accountId = demoSession?.id;
+  await delay(250);
+  if (!accountId || demoSession?.id !== accountId) throw preferenceError("sessionRequired");
+  const allowed = ["theme", "backgroundImage", "backgroundDim", "labelColors", "hiddenCategoryIds"];
+  if (!input || typeof input !== "object" || Object.keys(input).some(key => !allowed.includes(key))) throw preferenceError("invalid");
+  const current = normalizePreferences(state.preferencesByAccount?.[accountId]);
+  const candidate = { ...current, ...input };
+  if (!["light", "dark", "system"].includes(candidate.theme)
+      || !Number.isInteger(candidate.backgroundDim) || candidate.backgroundDim < 50 || candidate.backgroundDim > 95) throw preferenceError("invalid");
+  if (!validBackgroundImage(candidate.backgroundImage)) throw preferenceError("invalidImage");
+  const categoryIds = new Set(state.categories.map(category => category.id));
+  if (!candidate.labelColors || typeof candidate.labelColors !== "object" || Array.isArray(candidate.labelColors)
+      || Object.entries(candidate.labelColors).some(([id, color]) => !categoryIds.has(id) || typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color))
+      || !Array.isArray(candidate.hiddenCategoryIds) || candidate.hiddenCategoryIds.some(id => !categoryIds.has(id))) throw preferenceError("invalid");
+  const saved = normalizePreferences(candidate);
+  const preferencesByAccount = { ...state.preferencesByAccount, [accountId]: saved };
+  // Commit only after storage succeeds so a full browser store cannot fake a save.
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, preferencesByAccount }));
+  } catch { throw preferenceError("storageFull"); }
+  state.preferencesByAccount = preferencesByAccount;
+  return clone(saved);
+}
+
+export async function resetPersonalPreferences() {
+  return savePersonalPreferences(normalizePreferences());
 }
 
 export async function getSettings() {

@@ -1,6 +1,6 @@
 import { createElement, House, Inbox, ListTodo, PencilLine, Plus, Bot, Users,
   Link, Settings, Sparkles, ChevronRight, CircleAlert, CircleCheck,
-  ListChecks, Lightbulb, TrendingUp, Menu, ShieldCheck, Search } from "lucide";
+  ListChecks, Lightbulb, TrendingUp, Menu, ShieldCheck, Search, Palette } from "lucide";
 
 /* Presentation composition only.
  * Existing renderers supply controls with their original data attributes.
@@ -46,12 +46,12 @@ function renderShell({ state, t, canAccessTab, navigateTo }) {
     ["tasks", "tasks", ListTodo], ["drafts", "drafts", PencilLine],
     ["compose", "compose", Plus], ["rules", "automation", Bot],
     ["admin", "team", Users, "employees"], ["import", "connection", Link],
-    ["admin", "settings", Settings, "general"]
+    ["admin", "settings", Settings, "general"], ["preferences", "preferences", Palette]
   ];
   nav.replaceChildren();
   for (const [tab, label, shape, section] of links) {
     if (label === "automation") nav.append(node("div", "nav-label workspace-label", d("workspace")));
-    const control = button(d(label), shape, () => {
+    const control = button(tab === "preferences" ? t("preferences.title") : d(label), shape, () => {
       if (section) adminSection = section;
       document.querySelector(".app").classList.remove("menu-open");
       navigateTo(tab);
@@ -91,6 +91,10 @@ function renderShell({ state, t, canAccessTab, navigateTo }) {
   document.querySelector("#pageTitle").textContent = state.tab === "dashboard"
     ? `${d("hello")}, ${state.session?.name?.split(" ")[0] || "Courio"}` : d(headings[state.tab]);
   if (state.tab === "dashboard") document.querySelector("#pageSubtitle").textContent = d("attention");
+  if (state.tab === "preferences") {
+    document.querySelector("#pageTitle").textContent = t("preferences.title");
+    document.querySelector("#pageSubtitle").textContent = t("preferences.subtitle");
+  }
 }
 
 // Overview: compose existing digest/recommendations around live queue counts.

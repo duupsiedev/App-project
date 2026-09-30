@@ -1,5 +1,8 @@
 import "./styles.css";
 import "./styles/redesign.css";
+import "./styles/appearance.css";
+import { applyAppearance } from "./ui/appearance.js";
+import { renderPreferencesView, prepareBackgroundImage } from "./ui/preferencesView.js";
 import { applyWorkspaceLayout } from "./ui/workspaceLayout.js";
 import { renderTaskEditor } from "./ui/taskEditor.js";
 import { createTranslator, getPageCopy, normalizeLanguage } from "./i18n/translations.js";
@@ -20,6 +23,9 @@ import {
   getDraftDetail,
   getDraftForEmail,
   getSettings,
+  getPersonalPreferences,
+  savePersonalPreferences,
+  resetPersonalPreferences,
   getDemoSession,
   getEmailThread,
   getSetupImportPreview,
@@ -59,7 +65,7 @@ import {
 // ============================================================================
 
 const app = document.querySelector("#app");
-const VALID_TABS = new Set(["dashboard", "import", "triage", "tasks", "compose", "rules", "drafts", "admin"]);
+const VALID_TABS = new Set(["dashboard", "import", "triage", "tasks", "compose", "rules", "drafts", "admin", "preferences"]);
 
 const state = {
   tab: "dashboard",
@@ -82,6 +88,8 @@ const state = {
     autoSend: false
   },
   settingsForm: null,
+  preferences: null,
+  preferencesForm: null,
   loading: {
     emails: true,
     rules: true,
@@ -172,6 +180,7 @@ app.innerHTML = `
       <section id="rules" class="section"></section>
       <section id="drafts" class="section"></section>
       <section id="admin" class="section"></section>
+      <section id="preferences" class="section"></section>
     </main>
   </div>
   <div id="drawerRoot"></div>
@@ -196,7 +205,7 @@ async function runAction(key, action, successMessage) {
     await action();
     if (successMessage) toast(successMessage);
   } catch (error) {
-    toast(error.code ? t(`taskWork.${error.code}`) : error.message || "Something went wrong in the mock workflow.", true);
+    toast(error.translationKey ? t(error.translationKey) : error.code ? t(`taskWork.${error.code}`) : error.message || "Something went wrong in the mock workflow.", true);
   } finally {
     setBusy(key, false);
   }
@@ -225,7 +234,7 @@ function isEmployeeSession() {
 
 function allowedTabs() {
   if (!state.session) return new Set([]);
-  if (isEmployeeSession()) return new Set(["triage", "tasks", "compose"]);
+  if (isEmployeeSession()) return new Set(["triage", "tasks", "compose", "preferences"]);
   return VALID_TABS;
 }
 
@@ -243,6 +252,8 @@ function navigateTo(tab, options = {}) {
   }
 
   const previousTab = state.tab;
+  if (previousTab === "preferences" && tab !== "preferences") state.preferencesForm = null;
+  if (tab === "preferences" && previousTab !== "preferences") state.preferencesForm = structuredClone(state.preferences);
   if (previousTab === "admin" && tab !== "admin") {
     state.settingsForm = null;
   }
@@ -301,18 +312,22 @@ async function refreshCategoryState(keepSelectedId = state.selectedCategory?.id)
 }
 
 async function refreshWorkspaceForSession() {
+  state.preferencesForm = null;
+  state.triageCategoryFilter = "all";
   state.taskEditor = null;
   state.selectedTask = null;
-  const [session, emails, tasks, drafts, composeDrafts, digest, activity] = await Promise.all([
+  const [session, emails, tasks, drafts, composeDrafts, digest, activity, preferences] = await Promise.all([
     getDemoSession(),
     listEmails(),
     listTasks(),
     listDrafts(),
     listComposeDrafts(),
     generateMorningDigest(),
-    listActivity()
+    listActivity(),
+    getPersonalPreferences()
   ]);
   state.session = session;
+  state.preferences = preferences;
   state.emails = emails;
   state.tasks = tasks;
   state.drafts = drafts;
@@ -440,6 +455,8 @@ async function loadInitialData() {
     const [demoAccounts, session, emails, categories, employees, rules, drafts, tasks, composeDrafts, settings, digest, assistantMessages, activity, setupPreview] = await Promise.all([listDemoAccounts(), getDemoSession(), listEmails(), listCategories(), listEmployees(), listRules(), listDrafts(), listTasks(), listComposeDrafts(), getSettings(), generateMorningDigest(), listAssistantMessages(), listActivity(), getSetupImportPreview()]);
     state.demoAccounts = demoAccounts;
     state.session = session;
+    state.preferences = await getPersonalPreferences();
+    state.preferencesForm = null;
     state.emails = emails;
     state.categories = categories;
     state.employees = employees;
@@ -491,11 +508,36 @@ function render() {
   renderRules();
   renderDrafts();
   renderAdmin();
+  renderPreferences();
   renderDrawer();
   renderConfirmModal();
   renderAssistant();
   renderDemoSession();
   applyWorkspaceLayout({ state, t, canAccessTab, navigateTo });
+  applyAppearance(state.session ? state.preferences : null, state.categories);
+}
+
+function renderPreferences() {
+  const root = document.querySelector("#preferences");
+  if (state.tab !== "preferences" || !state.session) { root.replaceChildren(); return; }
+  state.preferencesForm ||= structuredClone(state.preferences);
+  renderPreferencesView(root, {
+    form: state.preferencesForm, categories: state.categories, t,
+    busy: isBusy("preferences") || isBusy("preference-image"),
+    onChange: form => { state.preferencesForm = form; },
+    onImage: async file => {
+      if (!file) return;
+      const form = state.preferencesForm;
+      const accountId = state.session?.id;
+      setBusy("preference-image", true);
+      try {
+        const image = await prepareBackgroundImage(file);
+        if (state.preferencesForm === form && state.session?.id === accountId) form.backgroundImage = image;
+      } catch {
+        if (state.preferencesForm === form) toast(t("preferences.invalidImage"), true);
+      } finally { setBusy("preference-image", false); }
+    }
+  });
 }
 
 // ============================================================================
@@ -644,7 +686,8 @@ function renderImport() {
 
 function renderTriage() {
   const employeeById = Object.fromEntries(state.employees.map((employee) => [employee.id, employee]));
-  const categoryOptions = triageCategoryOptions();
+  const categoryOptions = triageCategoryOptions().filter(category =>
+    !state.preferences?.hiddenCategoryIds.includes(category.id) || category.name === state.triageCategoryFilter);
   const filteredEmails = getTriageFilteredEmails();
   const removableEmails = filteredEmails.filter((email) => email.canArchive);
   const selectedCategoryLabel = state.triageCategoryFilter === "all" ? t("triage.allCategories") : state.triageCategoryFilter;
@@ -660,7 +703,7 @@ function renderTriage() {
               <td>${escapeHtml(email.subject)}</td>
               <td>${escapeHtml(email.sender)}<br><small>${escapeHtml(email.senderEmail || "")}</small></td>
               <td>
-                <span class="badge ${badgeClass(email.category)}">${escapeHtml(email.category)}</span><br>
+                <span class="badge ${badgeClass(email.category)}" data-category-label="${escapeHtml(email.category)}">${escapeHtml(email.category)}</span><br>
                 <small>${escapeHtml(email.urgency || "Medium")} urgency - ${email.confidence || 80}% confidence</small>
                 <small class="triage-reason" title="${escapeHtml(email.explanation || "")}">Why: ${escapeHtml(email.explanation || "Matched the current local category rules.")}</small>
               </td>
@@ -921,7 +964,7 @@ function renderDrawer() {
     <aside class="review-drawer" aria-label="Email review">
       <div class="drawer-header">
         <div>
-          <div class="badge ${badgeClass(email.category)}">${escapeHtml(email.category)}</div>
+          <div class="badge ${badgeClass(email.category)}" data-category-label="${escapeHtml(email.category)}">${escapeHtml(email.category)}</div>
           <h2>${escapeHtml(email.subject)}</h2>
           <p>${escapeHtml(email.sender)} - ${escapeHtml(email.senderEmail)}</p>
         </div>
@@ -1591,7 +1634,7 @@ function renderAdmin() {
               <tbody>
                 ${state.categories.map((category) => `
                   <tr>
-                    <td><span class="badge ${badgeClass(category.name)}">${escapeHtml(category.name)}</span>${category.system ? `<br><small>System default</small>` : ""}</td>
+                    <td><span class="badge ${badgeClass(category.name)}" data-category-label="${escapeHtml(category.name)}">${escapeHtml(category.name)}</span>${category.system ? `<br><small>System default</small>` : ""}</td>
                     <td>${escapeHtml(category.description || "No description yet.")}</td>
                     <td>${category.active ? "Active" : "Archived"}</td>
                     <td><button class="btn subtle" data-edit-category="${category.id}">Edit</button></td>
@@ -1634,6 +1677,24 @@ function badgeClass(label) {
 document.addEventListener("click", async (event) => {
   const target = event.target.closest("button");
   if (!target) return;
+
+  if (target.dataset.discardPreferences !== undefined) {
+    state.preferencesForm = structuredClone(state.preferences);
+    render();
+    return;
+  }
+  if (target.dataset.removeBackground !== undefined) {
+    state.preferencesForm.backgroundImage = null;
+    render();
+    return;
+  }
+  if (target.dataset.resetPreferences !== undefined) {
+    await runAction("preferences", async () => {
+      state.preferences = await resetPersonalPreferences();
+      state.preferencesForm = structuredClone(state.preferences);
+    }, t("preferences.resetDone"));
+    return;
+  }
 
   if (target.dataset.closeDrawer !== undefined) state.taskEditor = null;
   if (target.dataset.addTask !== undefined || target.dataset.editTask) {
@@ -2304,6 +2365,18 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  if (event.target.matches("[data-preferences-form]")) {
+    event.preventDefault();
+    if (isBusy("preferences") || isBusy("preference-image")) return;
+    const preferences = structuredClone(state.preferencesForm);
+    await runAction("preferences", async () => {
+      const saved = await savePersonalPreferences(preferences);
+      state.preferences = saved;
+      state.preferencesForm = state.tab === "preferences" ? structuredClone(saved) : null;
+      if (state.preferences.hiddenCategoryIds.some(id => state.categories.find(category => category.id === id)?.name === state.triageCategoryFilter)) state.triageCategoryFilter = "all";
+    }, t("preferences.saved"));
+    return;
+  }
   const taskForm = event.target.closest("[data-task-editor]");
   if (taskForm) {
     event.preventDefault();
