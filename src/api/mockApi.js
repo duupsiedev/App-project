@@ -161,8 +161,8 @@ const defaultState = {
 };
 
 const state = loadState();
-let assistantHistory = loadAssistantHistory();
 let demoSession = loadDemoSession();
+let assistantHistory = loadAssistantHistory();
 const delay = (ms = 550) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function clone(value) {
@@ -358,6 +358,9 @@ function normalizeTask(task) {
     priority: task.priority || "Medium",
     category: task.category || "General",
     assignedTo: task.assignedTo || "",
+    collaboratorIds: Array.isArray(task.collaboratorIds) ? [...new Set(task.collaboratorIds.filter(id => typeof id === "string" && id !== task.assignedTo))] : [],
+    parentTaskId: task.parentTaskId || null,
+    requestedByEmployeeId: task.requestedByEmployeeId || null,
     status: task.status === "Done" ? "Done" : "Open",
     notes: task.notes || "",
     dueAt: task.dueAt || null,
@@ -376,6 +379,7 @@ function normalizeTask(task) {
 
 function normalizeComposeDraft(draft) {
   return {
+    ownerEmployeeId: draft.ownerEmployeeId || "emp-1",
     id: draft.id || `compose-${Date.now()}`,
     to: draft.to?.trim() || "",
     cc: draft.cc?.trim() || "",
@@ -458,7 +462,7 @@ function requireAdmin() {
 
 function loadAssistantHistory() {
   try {
-    const saved = window.localStorage.getItem(CHAT_STORAGE_KEY);
+    const saved = window.localStorage.getItem(`${CHAT_STORAGE_KEY}.${demoSession?.id || "signed-out"}`);
     if (!saved) {
       return [
         {
@@ -481,7 +485,7 @@ function loadAssistantHistory() {
 }
 
 function persistAssistantHistory() {
-  window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(assistantHistory));
+  window.localStorage.setItem(`${CHAT_STORAGE_KEY}.${demoSession?.id || "signed-out"}`, JSON.stringify(assistantHistory));
 }
 
 function lowRiskBulkApprovalEnabled() {
@@ -548,7 +552,8 @@ function buildDraftView(draft) {
   const email = state.emails.find((item) => item.id === (draft.emailId || draft.id));
   const sourceEmailStatus = emailIsComplete(email || {}) ? "Done" : "Open";
   const isReady = emailIsComplete(email || {});
-  const canApprove = email?.workflowState === WORKFLOW_STATE.DRAFT_SAVED;
+  const awaitingApproval = email?.workflowState === WORKFLOW_STATE.DRAFT_SAVED;
+  const canApprove = awaitingApproval && !isEmployeeSession();
   const statusLabel = draftStatusLabel(email?.workflowState);
 
   return {
@@ -566,8 +571,9 @@ function buildDraftView(draft) {
     statusLabel,
     isReadyForHumanSend: isReady,
     canApprove,
+    awaitingApproval,
     canSelectForBulkApproval: canApprove,
-    approvalBlocker: canApprove ? "" : isReady ? "Source email is completed." : "Review and save this draft before approving."
+    approvalBlocker: canApprove ? "" : isEmployeeSession() && awaitingApproval ? "An admin must approve this draft." : isReady ? "Source email is completed." : "Review and save this draft before approving."
   };
 }
 
@@ -581,6 +587,7 @@ function buildEmailView(email) {
 
   return {
     ...email,
+    automationSuggestions: matchingRules(email).map(rule => ({ id: rule.id, title: rule.title, category: rule.category, explanation: rule.explanation, description: rule.desc })),
     archived: Boolean(email.archivedAt),
     reviewed: isReviewed,
     status: isDone ? "Done" : "Open",
@@ -678,6 +685,10 @@ function buildTaskView(task) {
   );
   return {
     ...task,
+    assignedEmployees: state.employees.filter(employee => taskParticipants(task).includes(employee.id)).map(clone),
+    canManageCollaborators: !isEmployeeSession() || task.assignedTo === sessionEmployeeId(),
+    overdue: task.status !== "Done" && Boolean(task.dueAt) && task.dueAt < localDateKey(),
+    dueToday: task.status !== "Done" && task.dueAt === localDateKey(),
     followUp: {
       ...task.followUp,
       status: !followUpDueAt ? "not_scheduled" : followUpOverdue ? "overdue" : "scheduled",
@@ -690,9 +701,9 @@ function buildTaskView(task) {
       latestAt: latestHistory?.at || null
     },
     history: history.map(entry => ({ ...entry, canRestore: Boolean(entry.before)
-      && (!isEmployeeSession() || (task.assignedTo === sessionEmployeeId() && !Object.hasOwn(entry.before, "assignedTo"))) })),
+      && (!isEmployeeSession() || (taskParticipants(task).includes(sessionEmployeeId()) && !Object.hasOwn(entry.before, "assignedTo") && (!Object.hasOwn(entry.before, "collaboratorIds") || task.assignedTo === sessionEmployeeId()))) })),
     assignedEmployee: assignedEmployee ? clone(assignedEmployee) : null,
-    sourceEmail: email ? buildEmailView(email) : null,
+    sourceEmail: email && canAccessEmail(email) ? buildEmailView(email) : null,
     hiddenFromInbox: Boolean(email?.archivedAt),
     sourceCompleted: email ? emailIsComplete(email) : false
   };
@@ -727,12 +738,14 @@ function getCompletionCheck(email) {
 function findEmail(id) {
   const email = state.emails.find((item) => item.id === id);
   if (!email) throw new Error("Email not found.");
+  if (!canAccessEmail(email)) throw taskError("forbidden");
   return email;
 }
 
 function findDraft(id) {
   const draft = state.drafts.find((item) => item.id === id);
   if (!draft) throw new Error("Draft not found.");
+  findEmail(draft.emailId || draft.id);
   return draft;
 }
 
@@ -746,6 +759,34 @@ function visibleEmails() {
     if (isEmployeeSession()) return email.assignedTo === sessionEmployeeId();
     return true;
   });
+}
+
+function canAccessEmail(email) {
+  return Boolean(email) && (!isEmployeeSession() || email.assignedTo === sessionEmployeeId());
+}
+
+function accessibleDrafts() {
+  return state.drafts.filter(draft => canAccessEmail(state.emails.find(email => email.id === (draft.emailId || draft.id))));
+}
+
+function taskParticipants(task) {
+  return [task.assignedTo, ...(task.collaboratorIds || [])].filter(Boolean);
+}
+
+function localDateKey() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function matchingRules(email) {
+  return state.rules.filter(rule => rule.on && ((rule.matches || []).includes(email.subject) || rule.category === email.category));
+}
+
+export async function applyRuleSuggestion(emailId, ruleId) {
+  const email = findEmail(emailId);
+  const rule = matchingRules(email).find(item => item.id === ruleId);
+  if (!rule) throw taskError("forbidden");
+  return updateEmailCategory(emailId, rule.category);
 }
 
 function findEmployee(id) {
@@ -844,9 +885,9 @@ function normalizeEmployeeInput(employee, existingId = null) {
 
 function buildDigest() {
   const openEmails = visibleEmails().filter((email) => !emailIsComplete(email));
-  const draftViews = state.drafts.map(buildDraftView);
+  const draftViews = accessibleDrafts().map(buildDraftView);
   const readyDrafts = draftViews.filter((draft) => draft.isReadyForHumanSend).length;
-  const waitingDrafts = draftViews.filter((draft) => draft.canSelectForBulkApproval).length;
+  const waitingDrafts = draftViews.filter((draft) => draft.awaitingApproval).length;
   const byCategory = (category) => openEmails.filter((email) => email.category === category);
   const urgent = openEmails.filter((email) => email.urgency === "High");
 
@@ -869,6 +910,7 @@ function buildDigest() {
 }
 
 function getOrCreateInvoiceRule() {
+  requireAdmin();
   const existing = state.rules.find((rule) => /invoice/i.test(`${rule.title} ${rule.desc}`));
   if (existing) {
     existing.on = true;
@@ -959,9 +1001,9 @@ function answerAssistantCommand(rawMessage, context = {}) {
   const urgentCount = inboxEmails.filter((email) => !emailIsComplete(email) && email.urgency === "High").length;
   const invoiceCategory = categoryName("cat-accounting", "Accounting");
   const invoiceCount = inboxEmails.filter((email) => !emailIsComplete(email) && email.category === invoiceCategory).length;
-  const waitingDrafts = state.drafts
+  const waitingDrafts = accessibleDrafts()
     .map(buildDraftView)
-    .filter((draft) => draft.canSelectForBulkApproval)
+    .filter((draft) => draft.awaitingApproval)
     .length;
   const mentionsInvoice = assistantMessageMatches(message, ["invoice", "invoices", "accounting"]);
   const mentionsRule = assistantMessageMatches(message, ["rule", "rules", "create rule"]);
@@ -1054,6 +1096,7 @@ export async function setDemoSession(accountId) {
   const account = DEMO_ACCOUNTS.find((item) => item.id === accountId);
   if (!account) throw new Error("Demo account not found.");
   demoSession = account;
+  assistantHistory = loadAssistantHistory();
   persistDemoSession();
   return clone(demoSession);
 }
@@ -1061,6 +1104,7 @@ export async function setDemoSession(accountId) {
 export async function logoutDemoSession() {
   await delay(150);
   demoSession = null;
+  assistantHistory = loadAssistantHistory();
   persistDemoSession();
   return null;
 }
@@ -1072,8 +1116,8 @@ export async function listTasks() {
   return clone(
     state.tasks
       .map(buildTaskView)
-      .filter((task) => !task.hiddenFromInbox)
-      .filter((task) => !isEmployeeSession() || task.assignedTo === sessionEmployeeId())
+      .filter((task) => !task.hiddenFromInbox || task.status !== "Done")
+      .filter((task) => !isEmployeeSession() || taskParticipants(task).includes(sessionEmployeeId()))
       .sort((left, right) => (
         taskRank(left) - taskRank(right)
         || (left.status === "Done") - (right.status === "Done")
@@ -1110,22 +1154,23 @@ export async function generateMorningDigest() {
 
 export async function listDrafts() {
   await delay(400);
-  if (isEmployeeSession()) return [];
-  return clone(state.drafts.map(buildDraftView));
+  return clone(accessibleDrafts().map(buildDraftView));
 }
 
 export async function listComposeDrafts() {
   await delay(350);
-  return clone([...state.composeDrafts].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+  return clone(state.composeDrafts.filter(draft => !isEmployeeSession() || draft.ownerEmployeeId === sessionEmployeeId()).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
 }
 
 export async function saveComposeDraft(draft) {
   await delay(500);
   const normalized = validateComposeDraft(draft);
   const existingIndex = state.composeDrafts.findIndex((item) => item.id === normalized.id);
+  if (existingIndex !== -1 && isEmployeeSession() && state.composeDrafts[existingIndex].ownerEmployeeId !== sessionEmployeeId()) throw taskError("forbidden");
   const now = new Date().toISOString();
   const saved = {
     ...normalized,
+    ownerEmployeeId: existingIndex === -1 ? sessionEmployeeId() || "emp-1" : state.composeDrafts[existingIndex].ownerEmployeeId,
     id: existingIndex === -1 ? `compose-${Date.now()}` : normalized.id,
     createdAt: existingIndex === -1 ? now : state.composeDrafts[existingIndex].createdAt,
     updatedAt: now
@@ -1204,6 +1249,7 @@ function normalizePreferences(input = {}) {
   const value = input && typeof input === "object" ? input : {};
   return {
     theme: ["light", "dark", "system"].includes(value.theme) ? value.theme : "light",
+    language: ["en", "fr"].includes(value.language) ? value.language : "workspace",
     backgroundImage: validBackgroundImage(value.backgroundImage) ? value.backgroundImage : null,
     backgroundDim: Number.isInteger(value.backgroundDim) && value.backgroundDim >= 50 && value.backgroundDim <= 95 ? value.backgroundDim : 80,
     labelColors: Object.fromEntries(Object.entries(value.labelColors || {}).filter(([id, color]) =>
@@ -1220,10 +1266,11 @@ export async function savePersonalPreferences(input = {}) {
   const accountId = demoSession?.id;
   await delay(250);
   if (!accountId || demoSession?.id !== accountId) throw preferenceError("sessionRequired");
-  const allowed = ["theme", "backgroundImage", "backgroundDim", "labelColors", "hiddenCategoryIds"];
+  const allowed = ["theme", "language", "backgroundImage", "backgroundDim", "labelColors", "hiddenCategoryIds"];
   if (!input || typeof input !== "object" || Object.keys(input).some(key => !allowed.includes(key))) throw preferenceError("invalid");
   const current = normalizePreferences(state.preferencesByAccount?.[accountId]);
   const candidate = { ...current, ...input };
+  if (!["workspace", "en", "fr"].includes(candidate.language)) throw preferenceError("invalid");
   if (!["light", "dark", "system"].includes(candidate.theme)
       || !Number.isInteger(candidate.backgroundDim) || candidate.backgroundDim < 50 || candidate.backgroundDim > 95) throw preferenceError("invalid");
   if (!validBackgroundImage(candidate.backgroundImage)) throw preferenceError("invalidImage");
@@ -1269,6 +1316,7 @@ export async function resetDemoData() {
   requireAdmin();
   window.localStorage.removeItem(STORAGE_KEY);
   window.localStorage.removeItem(CHAT_STORAGE_KEY);
+  DEMO_ACCOUNTS.forEach(account => window.localStorage.removeItem(`${CHAT_STORAGE_KEY}.${account.id}`));
   return clone(defaultState);
 }
 
@@ -1516,7 +1564,7 @@ function taskError(code) {
 
 function validateTaskChanges(updates) {
   const changes = {};
-  for (const field of ["title", "notes", "priority", "status", "assignedTo", "dueAt"]) {
+  for (const field of ["title", "notes", "priority", "status", "assignedTo", "collaboratorIds", "dueAt"]) {
     if (Object.hasOwn(updates, field)) changes[field] = updates[field];
   }
   if ("title" in changes) {
@@ -1527,6 +1575,10 @@ function validateTaskChanges(updates) {
   if ("priority" in changes && !["High", "Medium", "Low"].includes(changes.priority)) throw taskError("invalidPriority");
   if ("status" in changes && !["Open", "Done"].includes(changes.status)) throw taskError("invalidStatus");
   if ("assignedTo" in changes && changes.assignedTo && !state.employees.some(employee => employee.id === changes.assignedTo)) throw taskError("invalidAssignee");
+  if ("collaboratorIds" in changes) {
+    if (!Array.isArray(changes.collaboratorIds) || changes.collaboratorIds.some(id => !state.employees.some(employee => employee.id === id))) throw taskError("invalidAssignee");
+    changes.collaboratorIds = [...new Set(changes.collaboratorIds)];
+  }
   if ("dueAt" in changes) {
     changes.dueAt = changes.dueAt || null;
     if (changes.dueAt && (!/^\d{4}-\d{2}-\d{2}$/.test(changes.dueAt)
@@ -1539,15 +1591,18 @@ function validateTaskChanges(updates) {
 function taskForUpdate(id) {
   const task = state.tasks.find(item => item.id === id);
   if (!task) throw taskError("notFound");
-  if (isEmployeeSession() && task.assignedTo !== sessionEmployeeId()) throw taskError("forbidden");
+  if (isEmployeeSession() && !taskParticipants(task).includes(sessionEmployeeId())) throw taskError("forbidden");
   return task;
 }
 
 // Store only changed fields: recovery never rewinds unrelated email/workflow data.
 function applyTaskChanges(task, changes, action = "updated", restoredEntryId = null) {
+  if ("assignedTo" in changes || "collaboratorIds" in changes) {
+    changes.collaboratorIds = (changes.collaboratorIds || task.collaboratorIds || []).filter(id => id !== (changes.assignedTo ?? task.assignedTo));
+  }
   const before = {};
   for (const [field, value] of Object.entries(changes)) {
-    if (task[field] !== value) before[field] = task[field] ?? null;
+    if (JSON.stringify(task[field]) !== JSON.stringify(value)) before[field] = clone(task[field] ?? null);
   }
   if (!Object.keys(before).length) return;
   const now = new Date().toISOString();
@@ -1567,7 +1622,7 @@ export async function createTask(input = {}) {
   await delay(400);
   const changes = validateTaskChanges({
     title: input.title, notes: input.notes || "", priority: input.priority || "Medium",
-    dueAt: input.dueAt, assignedTo: input.assignedTo ?? sessionEmployeeId()
+    dueAt: input.dueAt, assignedTo: input.assignedTo ?? sessionEmployeeId(), collaboratorIds: input.collaboratorIds || []
   });
   if (isEmployeeSession() && changes.assignedTo !== sessionEmployeeId()) throw taskError("forbidden");
   const task = normalizeTask({ ...changes, id: `task-${crypto.randomUUID()}` });
@@ -1583,7 +1638,7 @@ export async function getOrCreateEmailTask(emailId) {
   const email = findEmail(emailId);
   if (isEmployeeSession() && email.assignedTo !== sessionEmployeeId()) throw taskError("forbidden");
   let task = state.tasks.find(item => item.emailId === emailId);
-  if (task && isEmployeeSession() && task.assignedTo !== sessionEmployeeId()) throw taskError("forbidden");
+  if (task && isEmployeeSession() && !taskParticipants(task).includes(sessionEmployeeId())) throw taskError("forbidden");
   if (!task) {
     task = createTaskFromEmail(email);
     state.tasks.push(task);
@@ -1598,6 +1653,7 @@ export async function restoreTaskChange(id, historyId) {
   const entry = task.history.find(item => item.id === historyId);
   if (!entry?.before) throw taskError("noSnapshot");
   if (isEmployeeSession() && Object.hasOwn(entry.before, "assignedTo")) throw taskError("forbidden");
+  if (isEmployeeSession() && Object.hasOwn(entry.before, "collaboratorIds") && task.assignedTo !== sessionEmployeeId()) throw taskError("forbidden");
   const changes = validateTaskChanges(entry.before);
   applyTaskChanges(task, changes, "restored", historyId);
   persistState();
@@ -1610,6 +1666,7 @@ export async function updateTask(id, updates = {}) {
   const task = taskForUpdate(id);
   const changes = validateTaskChanges(updates);
   if (isEmployeeSession() && Object.hasOwn(changes, "assignedTo")) throw taskError("forbidden");
+  if (isEmployeeSession() && Object.hasOwn(changes, "collaboratorIds") && task.assignedTo !== sessionEmployeeId()) throw taskError("forbidden");
   applyTaskChanges(task, changes);
   persistState();
   return clone(buildTaskView(task));
@@ -1620,7 +1677,7 @@ export async function updateTaskFollowUp(id, updates = {}) {
   syncTasksFromEmails();
   const task = state.tasks.find((item) => item.id === id);
   if (!task) throw new Error("Task not found.");
-  if (isEmployeeSession() && task.assignedTo !== sessionEmployeeId()) {
+  if (isEmployeeSession() && !taskParticipants(task).includes(sessionEmployeeId())) {
     throw new Error("This demo employee can only update assigned tasks.");
   }
 
@@ -1664,6 +1721,20 @@ export async function updateTaskFollowUp(id, updates = {}) {
   });
   persistState();
   return clone(buildTaskView(task));
+}
+
+export async function requestTaskFollowUp(id, input = {}) {
+  await delay(400);
+  const parent = taskForUpdate(id);
+  const values = validateTaskChanges({ title: input.title, notes: input.notes || "", assignedTo: input.assignedTo, dueAt: input.dueAt, priority: parent.priority });
+  if (!values.assignedTo) throw taskError("invalidAssignee");
+  const task = normalizeTask({ ...values, id: `task-${crypto.randomUUID()}`, parentTaskId: parent.id, requestedByEmployeeId: sessionEmployeeId() });
+  task.history.push({ id: crypto.randomUUID(), at: task.createdAt, action: "created", label: "Follow-up task created" });
+  state.tasks.push(task);
+  parent.history.push({ id: crypto.randomUUID(), at: task.createdAt, action: "followUpRequested", label: `Follow-up requested from ${findEmployee(values.assignedTo).name}` });
+  recordActivity("task-follow-up-requested", { taskId: task.id, label: `Follow-up requested: ${task.title}` });
+  persistState();
+  return clone({ id: task.id });
 }
 
 export async function createCategory(category) {
@@ -1776,6 +1847,7 @@ export async function deleteEmployee(id) {
     }
   });
   state.tasks.forEach((task) => {
+    task.collaboratorIds = (task.collaboratorIds || []).filter(employeeId => employeeId !== id);
     if (task.assignedTo === id) {
       task.assignedTo = "";
       task.updatedAt = new Date().toISOString();
@@ -1798,6 +1870,7 @@ export async function deleteEmployee(id) {
 
 export async function listActivity() {
   await delay(250);
+  if (isEmployeeSession()) return [];
   return clone(state.completedActions);
 }
 

@@ -1,6 +1,8 @@
 import "./styles.css";
 import "./styles/redesign.css";
 import "./styles/appearance.css";
+import "./styles/employeeWorkspace.css";
+import { renderTeam, renderColleagueFollowUp } from "./ui/employeeWorkspace.js";
 import { applyAppearance } from "./ui/appearance.js";
 import { renderPreferencesView, prepareBackgroundImage } from "./ui/preferencesView.js";
 import { applyWorkspaceLayout } from "./ui/workspaceLayout.js";
@@ -53,6 +55,8 @@ import {
   updateRule,
   updateEmailCategory,
   updateTask,
+  requestTaskFollowUp,
+  applyRuleSuggestion,
   createTask,
   getOrCreateEmailTask,
   restoreTaskChange,
@@ -65,7 +69,7 @@ import {
 // ============================================================================
 
 const app = document.querySelector("#app");
-const VALID_TABS = new Set(["dashboard", "import", "triage", "tasks", "compose", "rules", "drafts", "admin", "preferences"]);
+const VALID_TABS = new Set(["dashboard", "import", "triage", "tasks", "compose", "rules", "drafts", "admin", "preferences", "team"]);
 
 const state = {
   tab: "dashboard",
@@ -103,6 +107,7 @@ const state = {
   selectedEmployee: null,
   selectedTask: null,
   taskEditor: null,
+  colleagueFollowUp: null,
   selectedDraftIds: [],
   confirmDialog: null,
   digest: null,
@@ -181,6 +186,7 @@ app.innerHTML = `
       <section id="drafts" class="section"></section>
       <section id="admin" class="section"></section>
       <section id="preferences" class="section"></section>
+      <section id="team" class="section"></section>
     </main>
   </div>
   <div id="drawerRoot"></div>
@@ -234,7 +240,7 @@ function isEmployeeSession() {
 
 function allowedTabs() {
   if (!state.session) return new Set([]);
-  if (isEmployeeSession()) return new Set(["triage", "tasks", "compose", "preferences"]);
+  if (isEmployeeSession()) return new Set(["dashboard", "triage", "tasks", "drafts", "team", "compose", "preferences"]);
   return VALID_TABS;
 }
 
@@ -266,6 +272,7 @@ function navigateTo(tab, options = {}) {
   if (options.draftFilter) state.draftFilter = options.draftFilter;
 
   if (options.closeDrawers !== false) {
+    state.colleagueFollowUp = null;
     state.taskEditor = null;
     state.selectedTask = null;
     state.selectedEmail = null;
@@ -312,6 +319,14 @@ async function refreshCategoryState(keepSelectedId = state.selectedCategory?.id)
 }
 
 async function refreshWorkspaceForSession() {
+  state.colleagueFollowUp = null;
+  state.composeForm = { id: "new", to: "", cc: "", subject: "", body: "", attachments: [] };
+  state.selectedDraftIds = [];
+  state.taskAssigneeFilter = "all";
+  state.taskFollowUpFilter = "all";
+  state.settings = await getSettings();
+  state.rules = await listRules();
+  state.assistantMessages = await listAssistantMessages();
   state.preferencesForm = null;
   state.triageCategoryFilter = "all";
   state.taskEditor = null;
@@ -418,7 +433,7 @@ function isAdvancedSettingsForm() {
 }
 
 function currentLanguage() {
-  return normalizeLanguage(state.settings.language);
+  return normalizeLanguage(["en", "fr"].includes(state.preferences?.language) ? state.preferences.language : state.settings.language);
 }
 
 function t(key) {
@@ -486,7 +501,7 @@ async function loadInitialData() {
 
 function render() {
   if (state.session && !canAccessTab(state.tab)) {
-    state.tab = isEmployeeSession() ? "tasks" : "dashboard";
+    state.tab = "dashboard";
   }
   const pageCopy = getPageCopy(state.tab, currentLanguage());
   renderShellCopy();
@@ -509,6 +524,7 @@ function render() {
   renderDrafts();
   renderAdmin();
   renderPreferences();
+  renderTeam(document.querySelector("#team"), state.employees, t);
   renderDrawer();
   renderConfirmModal();
   renderAssistant();
@@ -749,7 +765,7 @@ function renderTasks() {
   const visibleTasks = state.tasks.filter((task) => {
     const matchesAssignee = !isAdminSession()
       || state.taskAssigneeFilter === "all"
-      || (state.taskAssigneeFilter === "unassigned" ? !task.assignedTo : task.assignedTo === state.taskAssigneeFilter);
+      || (state.taskAssigneeFilter === "unassigned" ? !task.assignedEmployees.length : task.assignedEmployees.some(employee => employee.id === state.taskAssigneeFilter));
     const matchesFollowUp = state.taskFollowUpFilter === "all"
       || (state.taskFollowUpFilter === "scheduled" && task.followUp?.enabled)
       || (state.taskFollowUpFilter === "overdue" && task.followUp?.overdue);
@@ -795,6 +811,7 @@ function renderTasks() {
                       ${state.employees.map((employee) => `<option value="${employee.id}" ${task.assignedTo === employee.id ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("")}
                     </select>`
                   : escapeHtml(task.assignedEmployee?.name || t("tasks.unassigned"))}
+                <small>${escapeHtml(task.assignedEmployees.filter(employee => employee.id !== task.assignedTo).map(employee => employee.name).join(", "))}</small>
               </td>
               <td>${escapeHtml(task.sourceEmail?.subject || "Local task")}<br><small>${escapeHtml(task.sourceEmail?.sender || "Demo inbox")}</small></td>
               <td><textarea data-task-note="${task.id}" placeholder="${t("tasks.notePlaceholder")}">${escapeHtml(task.notes || "")}</textarea></td>
@@ -802,6 +819,7 @@ function renderTasks() {
                 ${task.sourceEmail ? `<button class="btn subtle" data-review-email="${task.sourceEmail.id}">${t("tasks.reviewEmail")}</button>` : ""}
                 <button class="btn subtle" data-review-task="${task.id}">${t("tasks.viewHistory")}</button>
                 <button class="btn subtle" data-edit-task="${task.id}">${t("taskWork.edit")}</button>
+                <button class="btn subtle" data-request-task-follow-up="${task.id}">${t("employee.followUp")}</button>
                 <button class="btn subtle" data-save-task-note="${task.id}" ${isBusy(`task-note-${task.id}`) ? "disabled" : ""}>${isBusy(`task-note-${task.id}`) ? t("tasks.saving") : t("tasks.saveNote")}</button>
               </td>
             </tr>
@@ -920,6 +938,10 @@ function renderCompose() {
 
 function renderDrawer() {
   const root = document.querySelector("#drawerRoot");
+  if (state.colleagueFollowUp) {
+    renderColleagueFollowUp(root, state.colleagueFollowUp, state.employees, t);
+    return;
+  }
   if (state.taskEditor) {
     renderTaskEditor(root, state.taskEditor, state.employees, isAdminSession(), t);
     return;
@@ -1035,6 +1057,9 @@ function renderDrawer() {
           ? `<span class="status-text">Workflow complete</span>`
           : `<span class="status-text">Approving the draft completes this workflow.</span>`}
       </div>
+      <section class="workspace-rule-suggestions"><h3>${t("employee.automation")}</h3><p>${t("employee.automationNote")}</p>
+        ${(email.automationSuggestions || []).map(rule => `<div><strong>${escapeHtml(rule.title)}</strong><p>${escapeHtml(rule.explanation)}</p>${rule.category !== email.category && !emailDone ? `<button class="btn subtle" data-apply-workspace-rule="${escapeHtml(rule.id)}" data-rule-email="${escapeHtml(email.id)}">${t("employee.applyCategory")}: ${escapeHtml(rule.category)}</button>` : ""}</div>`).join("") || `<p>${t("employee.noRules")}</p>`}
+      </section>
       <p class="drawer-note">This is a local prototype. Courio does not send email.</p>
     </aside>
   `;
@@ -1309,6 +1334,7 @@ function taskRestoreSummary(values) {
   return Object.entries(values).map(([field, value]) => {
     const display = field === "assignedTo"
       ? state.employees.find(employee => employee.id === value)?.name || (value || t("tasks.unassigned"))
+      : field === "collaboratorIds" ? (value || []).map(id => state.employees.find(employee => employee.id === id)?.name || id).join(", ") || t("taskWork.none")
       : ["priority", "status"].includes(field) ? t(`taskWork.${value}`) : value || t("taskWork.none");
     return `${t(`taskWork.${field}`)}: ${display}`;
   }).join("; ");
@@ -1418,7 +1444,7 @@ function renderDrafts() {
   const lowRiskPendingCount = state.drafts.filter((draft) => draft.risk !== "High" && draft.canSelectForBulkApproval).length;
   const lowRiskDisabled = !lowRiskBulkApprovalEnabled();
   const filteredDrafts = state.drafts.filter((draft) => {
-    if (state.draftFilter === "needs_approval") return draft.canSelectForBulkApproval;
+    if (state.draftFilter === "needs_approval") return draft.awaitingApproval;
     if (state.draftFilter === "ready") return draft.isReadyForHumanSend;
     return true;
   });
@@ -1465,7 +1491,11 @@ function renderDrafts() {
       ${lowRiskDisabled ? `<div class="preview below-sm">Low-risk bulk approval is disabled by workspace settings.</div>` : ""}
       ${content}
     </div>
+    ${isEmployeeSession() ? `<p>${t("employee.approvalNote")}</p><section class="composed-draft-links"><h2>${t("employee.composed")}</h2>${state.composeDrafts.map(draft => `<button class="btn subtle" data-open-compose-draft="${escapeHtml(draft.id)}">${escapeHtml(draft.subject || t("compose.openDraft"))}</button>`).join("")}</section>` : ""}
   `;
+  if (isEmployeeSession()) {
+    document.querySelector("#drafts [data-approve-selected]")?.parentElement.remove();
+  }
 }
 
 function renderAssistant() {
@@ -1696,7 +1726,31 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (target.dataset.closeDrawer !== undefined) state.taskEditor = null;
+  if (target.dataset.closeDrawer !== undefined) { state.taskEditor = null; state.colleagueFollowUp = null; }
+  if (target.dataset.requestTaskFollowUp) {
+    state.colleagueFollowUp = state.tasks.find(task => task.id === target.dataset.requestTaskFollowUp);
+    render();
+    return;
+  }
+  if (target.dataset.composeColleague) {
+    const employee = state.employees.find(item => item.id === target.dataset.composeColleague);
+    if (!employee) return;
+    if (state.composeForm.to || state.composeForm.subject || state.composeForm.body || state.composeForm.attachments.length) {
+      toast(t("employee.finishCompose"), true);
+      return;
+    }
+    state.composeForm = { ...emptyComposeForm(), to: employee.email };
+    navigateTo("compose");
+    return;
+  }
+  if (target.dataset.applyWorkspaceRule) {
+    await runAction("apply-rule", async () => {
+      await applyRuleSuggestion(target.dataset.ruleEmail, target.dataset.applyWorkspaceRule);
+      await refreshEmails();
+      state.tasks = await listTasks();
+    }, t("employee.applied"));
+    return;
+  }
   if (target.dataset.addTask !== undefined || target.dataset.editTask) {
     state.taskEditor = target.dataset.editTask ? { ...state.tasks.find(task => task.id === target.dataset.editTask) } : {};
     state.selectedEmail = null;
@@ -1801,7 +1855,7 @@ document.addEventListener("click", async (event) => {
     await runAction("login-demo", async () => {
       const session = await setDemoSession(target.dataset.loginAccount);
       await refreshWorkspaceForSession();
-      state.tab = session.role === "Employee" ? "tasks" : "dashboard";
+      state.tab = "dashboard";
     }, t("auth.loginToast"));
     return;
   }
@@ -2365,6 +2419,20 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  const followUpForm = event.target.closest("[data-colleague-follow-up]");
+  if (followUpForm) {
+    event.preventDefault();
+    if (isBusy("colleague-follow-up")) return;
+    const values = Object.fromEntries(new FormData(followUpForm));
+    const id = followUpForm.dataset.colleagueFollowUp;
+    state.colleagueFollowUp = { ...state.colleagueFollowUp, formValues: values };
+    await runAction("colleague-follow-up", async () => {
+      await requestTaskFollowUp(id, values);
+      state.tasks = await listTasks();
+      state.colleagueFollowUp = null;
+    }, t("employee.requested"));
+    return;
+  }
   if (event.target.matches("[data-preferences-form]")) {
     event.preventDefault();
     if (isBusy("preferences") || isBusy("preference-image")) return;
@@ -2382,6 +2450,7 @@ document.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (isBusy("save-task")) return;
     const values = Object.fromEntries(new FormData(taskForm));
+    if (taskForm.querySelector("[data-collaborators-editable]")) values.collaboratorIds = new FormData(taskForm).getAll("collaboratorIds");
     const id = state.taskEditor?.id;
     state.taskEditor = { ...state.taskEditor, ...values };
     await runAction("save-task", async () => {

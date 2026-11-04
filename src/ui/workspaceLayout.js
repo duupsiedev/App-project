@@ -1,6 +1,7 @@
 import { createElement, House, Inbox, ListTodo, PencilLine, Plus, Bot, Users,
   Link, Settings, Sparkles, ChevronRight, CircleAlert, CircleCheck,
   ListChecks, Lightbulb, TrendingUp, Menu, ShieldCheck, Search, Palette } from "lucide";
+import { appendEmployeeTasks } from "./employeeWorkspace.js";
 
 /* Presentation composition only.
  * Existing renderers supply controls with their original data attributes.
@@ -9,6 +10,9 @@ import { createElement, House, Inbox, ListTodo, PencilLine, Plus, Bot, Users,
  */
 const selectedRows = new Map();
 const searches = new Map();
+const queueFilters = new Map();
+let previousSessionId;
+const searchText = value => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
 let adminSection = "general";
 let previousTab;
 
@@ -45,13 +49,13 @@ function renderShell({ state, t, canAccessTab, navigateTo }) {
     ["dashboard", "today", House], ["triage", "inbox", Inbox],
     ["tasks", "tasks", ListTodo], ["drafts", "drafts", PencilLine],
     ["compose", "compose", Plus], ["rules", "automation", Bot],
-    ["admin", "team", Users, "employees"], ["import", "connection", Link],
+    [state.session?.role === "Employee" ? "team" : "admin", "team", Users, "employees"], ["import", "connection", Link],
     ["admin", "settings", Settings, "general"], ["preferences", "preferences", Palette]
   ];
   nav.replaceChildren();
   for (const [tab, label, shape, section] of links) {
     if (label === "automation") nav.append(node("div", "nav-label workspace-label", d("workspace")));
-    const control = button(tab === "preferences" ? t("preferences.title") : d(label), shape, () => {
+    const control = button(tab === "team" ? t("employee.team") : tab === "preferences" ? t("preferences.title") : d(label), shape, () => {
       if (section) adminSection = section;
       document.querySelector(".app").classList.remove("menu-open");
       navigateTo(tab);
@@ -86,7 +90,7 @@ function renderShell({ state, t, canAccessTab, navigateTo }) {
     session.prepend(avatar);
     topbar.append(session);
   }
-  document.documentElement.lang = state.settings.language || "en";
+  document.documentElement.lang = ["en", "fr"].includes(state.preferences?.language) ? state.preferences.language : state.settings.language || "en";
   const headings = { dashboard: "today", triage: "inbox", tasks: "tasks", compose: "compose", drafts: "drafts", rules: "automation", admin: "settings", import: "connection" };
   document.querySelector("#pageTitle").textContent = state.tab === "dashboard"
     ? `${d("hello")}, ${state.session?.name?.split(" ")[0] || "Courio"}` : d(headings[state.tab]);
@@ -94,6 +98,10 @@ function renderShell({ state, t, canAccessTab, navigateTo }) {
   if (state.tab === "preferences") {
     document.querySelector("#pageTitle").textContent = t("preferences.title");
     document.querySelector("#pageSubtitle").textContent = t("preferences.subtitle");
+  }
+  if (state.tab === "team") {
+    document.querySelector("#pageTitle").textContent = t("employee.team");
+    document.querySelector("#pageSubtitle").textContent = t("employee.teamNote");
   }
 }
 
@@ -107,7 +115,7 @@ function renderOverview({ state, t, navigateTo }) {
   const d = key => t(`design.${key}`);
   const counts = [
     state.emails.filter(email => email.urgency === "High" && email.status !== "Done").length,
-    state.drafts.filter(draft => draft.canSelectForBulkApproval).length,
+    state.drafts.filter(draft => draft.awaitingApproval).length,
     state.tasks.filter(task => task.status !== "Done").length
   ];
   const go = [() => navigateTo("triage", { triageFilter: "urgent" }), () => navigateTo("drafts", { draftFilter: "needs_approval" }), () => navigateTo("tasks")];
@@ -151,6 +159,7 @@ function renderOverview({ state, t, navigateTo }) {
   const lower = node("div", "overview-lower");
   lower.append(next, side);
   root.replaceChildren(metrics, start, lower);
+  if (state.session?.role === "Employee") appendEmployeeTasks(root, state.tasks, t);
 }
 
 // Lists retain their existing rendered actions, checkboxes, notes, and selects.
@@ -175,6 +184,24 @@ function renderQueue({ state, t }, tab, config) {
   search.value = searches.get(tab) || "";
   searchBox.append(search);
   list.append(searchBox);
+  const filters = queueFilters.get(tab) || { status: "all", priority: "all", due: "all" };
+  const filterControls = node("div", "queue-extra-filters");
+  if (tab !== "drafts") {
+    const definitions = [["status", ["all", "Open", "Done"]], ["priority", ["all", "High", "Medium", "Low"]]];
+    if (tab === "tasks") definitions.push(["due", ["all", "overdue", "today"]]);
+    for (const [key, values] of definitions) {
+      const label = node("label", "", t(`employee.${key}`));
+      const control = node("select");
+      control.dataset.queueFilter = key;
+      values.forEach(value => { const option = node("option", "", t(`employee.${value}`)); option.value = value; control.append(option); });
+      control.value = filters[key];
+      control.onchange = () => { filters[key] = control.value; queueFilters.set(tab, filters); filter(); };
+      label.append(control);
+      filterControls.append(label);
+    }
+    list.append(filterControls);
+    search.placeholder = t(tab === "tasks" ? "employee.searchTasks" : "employee.searchInbox");
+  }
   const entries = [];
   let selected = selectedRows.get(tab);
   const selectedRecord = tab === "triage" ? state.selectedEmail : tab === "drafts" ? state.selectedDraft : null;
@@ -248,7 +275,7 @@ function renderQueue({ state, t }, tab, config) {
       // Review uses exactly the same API-backed handler as the original button.
       if (tab !== "tasks") trigger.click();
     });
-    entries.push({ id, entry, select, view, choose, text: `${title} ${subtitle}`.toLocaleLowerCase() });
+    entries.push({ id, entry, select, view, choose, record, text: searchText([title, subtitle, record.body, record.senderEmail, record.notes, record.description, record.category, ...(record.assignedEmployees || []).map(employee => employee.name)].join(" ")) });
   });
   const noMatch = node("p", "empty-state", d("noMatch"));
   noMatch.hidden = true;
@@ -257,16 +284,24 @@ function renderQueue({ state, t }, tab, config) {
   const removalDisabled = bulkRemove?.disabled;
   const removalTitle = bulkRemove?.title || "";
   const filter = () => {
-    const query = search.value.toLocaleLowerCase().trim();
+    const query = searchText(search.value).trim();
     searches.set(tab, search.value);
-    entries.forEach(item => { item.entry.hidden = !item.text.includes(query); });
+    entries.forEach(item => {
+      const record = item.record;
+      item.entry.hidden = !item.text.includes(query)
+        || (filters.status !== "all" && record.status !== filters.status)
+        || (filters.priority !== "all" && (record.priority || record.urgency) !== filters.priority)
+        || (filters.due === "overdue" && !record.overdue)
+        || (filters.due === "today" && !record.dueToday);
+    });
     noMatch.hidden = entries.some(item => !item.entry.hidden);
     if (bulkRemove) {
-      bulkRemove.disabled = removalDisabled || Boolean(query);
-      bulkRemove.title = query ? d("clearSearch") : removalTitle;
+      const narrowed = Boolean(query) || Object.values(filters).some(value => value !== "all");
+      bulkRemove.disabled = removalDisabled || narrowed;
+      bulkRemove.title = narrowed ? t("employee.clearFilters") : removalTitle;
     }
     if (!noMatch.hidden) detail.replaceChildren(node("p", "empty-state", d("noMatch")));
-    else if (!entries.some(item => item.id === selectedRows.get(tab) && !item.entry.hidden)) {
+    else if (!entries.some(item => item.id === selectedRows.get(tab) && !item.entry.hidden && detail.contains(item.view))) {
       entries.find(item => !item.entry.hidden)?.choose();
     }
   };
@@ -372,6 +407,10 @@ function renderSettings({ state, t }) {
 
 export function applyWorkspaceLayout(context) {
   const { state } = context;
+  if (previousSessionId !== state.session?.id) {
+    searches.clear(); selectedRows.clear(); queueFilters.clear();
+    previousSessionId = state.session?.id;
+  }
   if (previousTab === "admin" && state.tab !== "admin") adminSection = "general";
   previousTab = state.tab;
   renderShell(context);

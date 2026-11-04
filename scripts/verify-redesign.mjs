@@ -119,7 +119,7 @@ try {
   await page.locator('[data-login-account]').nth(1).click();
   await page.locator('.auth-overlay').waitFor({ state: 'hidden' });
   await page.locator('.mobile-menu').click();
-  assert.equal(await page.locator('.nav button:visible').count(), 4, 'Employee destinations include personal preferences but exclude Admin');
+  assert.equal(await page.locator('.nav button:visible').count(), 7, 'Employee destinations include Today, own drafts, directory and preferences but exclude Admin');
   assert.equal(await page.locator('[data-destination="admin"]').first().isVisible(), false);
   await page.screenshot({ path: '.courio-review/employee-mobile.png' });
   assert.deepEqual(externalRequests, [], "App makes no external service requests");

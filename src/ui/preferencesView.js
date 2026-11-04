@@ -23,6 +23,7 @@ export function renderPreferencesView(root, { form, categories, t, busy, onChang
   const p = key => t(`preferences.${key}`);
   root.innerHTML = `
     <form data-preferences-form class="preferences-form">
+      <fieldset class="preferences-section" ${busy ? "disabled" : ""}><legend>${t("employee.language")}</legend><select name="language" aria-label="${t("employee.language")}">${["workspace", "en", "fr"].map(language => `<option value="${language}" ${form.language === language ? "selected" : ""}>${t(`employee.${language}`)}</option>`).join("")}</select></fieldset>
       <fieldset class="preferences-section" ${busy ? "disabled" : ""}>
         <legend>${p("theme")}</legend>
         <div class="theme-options">
@@ -85,6 +86,7 @@ export function renderPreferencesView(root, { form, categories, t, busy, onChang
   root.oninput = event => {
     const target = event.target;
     if (target.name === "theme") form.theme = target.value;
+    else if (target.name === "language") form.language = target.value;
     else if (target.name === "backgroundDim") {
       form.backgroundDim = Number(target.value);
       root.querySelector("[data-dim-output]").textContent = `${form.backgroundDim}%`;

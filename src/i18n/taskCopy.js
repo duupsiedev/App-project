@@ -1,5 +1,6 @@
 export const taskCopy = {
   en: {
+    collaboratorIds: "Additional assignees", followUpRequested: "Follow-up requested from a colleague",
     add: "Add task", edit: "Edit task", emailTask: "Open / assign task",
     title: "Title", notes: "Notes", priority: "Priority", assignedTo: "Assigned to",
     dueAt: "Due date", status: "Status", High: "High", Medium: "Medium", Low: "Low",
@@ -16,6 +17,7 @@ export const taskCopy = {
     none: "None", myTasks: "My tasks"
   },
   fr: {
+    collaboratorIds: "Autres responsables", followUpRequested: "Suivi demandé à un collègue",
     add: "Ajouter une tâche", edit: "Modifier la tâche", emailTask: "Ouvrir / assigner la tâche",
     title: "Titre", notes: "Notes", priority: "Priorité", assignedTo: "Assignée à",
     dueAt: "Échéance", status: "Statut", High: "Élevée", Medium: "Moyenne", Low: "Faible",

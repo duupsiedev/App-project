@@ -61,9 +61,10 @@ try {
   await page.locator('[data-logout-demo]').click();
   await page.locator('[data-login-account="employee-marcus"]').click();
   await page.locator('.auth-overlay').waitFor({ state: 'hidden' });
+  await page.locator('[data-destination="tasks"]').click();
   await page.locator('#tasks .queue-item').filter({ hasText: 'Manual QA task' }).click();
   assert.equal(await page.locator('[data-task-note]').inputValue(), 'Original note');
-  await page.locator('[data-edit-task]').click();
+  await page.locator('#tasks [data-edit-task]').click();
   assert.equal(await page.locator('[data-task-editor] [name="assignedTo"]').count(), 0);
   await page.locator('.review-drawer [data-close-drawer]').click();
   await page.locator('[data-add-task]').click();

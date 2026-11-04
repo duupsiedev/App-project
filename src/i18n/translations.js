@@ -1,9 +1,11 @@
 import { redesignCopy } from "./redesignCopy.js";
 import { taskCopy } from "./taskCopy.js";
 import { preferencesCopy } from "./preferencesCopy.js";
+import { employeeCopy } from "./employeeCopy.js";
 
 const translations = {
   en: {
+    employee: employeeCopy.en,
     preferences: preferencesCopy.en,
     taskWork: taskCopy.en,
     design: redesignCopy.en,
@@ -168,6 +170,7 @@ const translations = {
     }
   },
   fr: {
+    employee: employeeCopy.fr,
     preferences: preferencesCopy.fr,
     taskWork: taskCopy.fr,
     design: redesignCopy.fr,

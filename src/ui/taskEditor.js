@@ -15,6 +15,7 @@ export function renderTaskEditor(root, task, employees, admin, t) {
         <label>${label("dueAt")}<input type="date" name="dueAt" value="${escapeHtml(task.dueAt || "")}"></label>
         ${admin ? `<label>${label("assignedTo")}<select name="assignedTo"><option value="">${t("tasks.unassigned")}</option>${employees.map(employee => `<option value="${escapeHtml(employee.id)}" ${task.assignedTo === employee.id ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("")}</select></label>` : ""}
         ${task.id ? `<label>${label("status")}<select name="status">${options(["Open", "Done"], task.status)}</select></label>` : ""}
+        ${admin || task.canManageCollaborators || !task.id ? `<fieldset class="task-collaborators" data-collaborators-editable><legend>${t("employee.collaborators")}</legend>${employees.filter(employee => employee.id !== task.assignedTo).map(employee => `<label><input type="checkbox" name="collaboratorIds" value="${escapeHtml(employee.id)}" ${task.collaboratorIds?.includes(employee.id) ? "checked" : ""}>${escapeHtml(employee.name)}</label>`).join("")}</fieldset>` : ""}
         <button class="btn primary" type="submit">${label("save")}</button>
       </form>
     </aside>`;
