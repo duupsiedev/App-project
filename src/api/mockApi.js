@@ -2,6 +2,7 @@ import { mockEmails } from "../data/mockEmails.js";
 import { mockCategories } from "../data/mockCategories.js";
 import { mockEmployees } from "../data/mockEmployees.js";
 import { mockRules } from "../data/mockRules.js";
+import { trustCopy } from "../i18n/trustCopy.js";
 
 const STORAGE_KEY = "courio.mockState.v1";
 const CHAT_STORAGE_KEY = "courio.assistantHistory.v1";
@@ -32,7 +33,8 @@ const WORKFLOW_STATE = Object.freeze({
   DRAFT_GENERATED: "draft_generated",
   DRAFT_REVIEWED: "draft_reviewed",
   DRAFT_SAVED: "draft_saved",
-  COMPLETED: "completed"
+  COMPLETED: "completed",
+  NO_REPLY_NEEDED: "no_reply_needed"
 });
 
 const WORKFLOW_STATES = new Set(Object.values(WORKFLOW_STATE));
@@ -353,6 +355,7 @@ function normalizeTask(task) {
   return {
     id: task.id || `task-${task.emailId || Date.now()}`,
     emailId: task.emailId || "",
+    origin: task.origin || null,
     title: task.title || "Review email",
     description: task.description || "",
     priority: task.priority || "Medium",
@@ -492,12 +495,17 @@ function lowRiskBulkApprovalEnabled() {
   return state.settings.allowLowRiskBulkApproval !== "No";
 }
 
-function actionRequiresDraft() {
-  return true;
+function isInformational(email) {
+  return email.suggestedDisposition === "information_only" && email.urgency === "Low";
+}
+
+function canMarkNoReply(email) {
+  return isInformational(email) && email.workflowState === WORKFLOW_STATE.READY_FOR_DRAFT
+    && !email.archivedAt && !findDraftByEmailId(email.id);
 }
 
 function emailIsComplete(email) {
-  return email.workflowState === WORKFLOW_STATE.COMPLETED;
+  return email.workflowState === WORKFLOW_STATE.COMPLETED || email.workflowState === WORKFLOW_STATE.NO_REPLY_NEEDED;
 }
 
 function draftReadyForApproval(draft) {
@@ -512,7 +520,8 @@ function workflowLabel(workflowState) {
     [WORKFLOW_STATE.DRAFT_GENERATED]: "Draft generated",
     [WORKFLOW_STATE.DRAFT_REVIEWED]: "Draft in review",
     [WORKFLOW_STATE.DRAFT_SAVED]: "Draft saved",
-    [WORKFLOW_STATE.COMPLETED]: "Completed"
+    [WORKFLOW_STATE.COMPLETED]: "Ready for human send",
+    [WORKFLOW_STATE.NO_REPLY_NEEDED]: "Reviewed - no reply needed"
   };
   return labels[workflowState] || "Review required";
 }
@@ -544,7 +553,7 @@ function completeEmailFromApprovedDraft(email, draft) {
   recordActivity("draft-approved", {
     emailId: email.id,
     draftId: draft.id,
-    label: `Draft approved and workflow completed: ${email.subject}`
+    label: `Draft approved for human send; not sent: ${email.subject}`
   });
 }
 
@@ -579,10 +588,11 @@ function buildDraftView(draft) {
 
 function buildEmailView(email) {
   const draft = findDraftByEmailId(email.id);
-  const requiresDraft = actionRequiresDraft(email);
+  const noReplyNeeded = email.workflowState === WORKFLOW_STATE.NO_REPLY_NEEDED;
+  const requiresDraft = !noReplyNeeded && (!isInformational(email) || Boolean(draft));
   const draftStarted = Boolean(draft);
-  const draftReady = emailIsComplete(email);
-  const isDone = draftReady;
+  const draftReady = email.workflowState === WORKFLOW_STATE.COMPLETED;
+  const isDone = emailIsComplete(email);
   const isReviewed = email.workflowState !== WORKFLOW_STATE.NEEDS_REVIEW;
 
   return {
@@ -590,6 +600,10 @@ function buildEmailView(email) {
     automationSuggestions: matchingRules(email).map(rule => ({ id: rule.id, title: rule.title, category: rule.category, explanation: rule.explanation, description: rule.desc })),
     archived: Boolean(email.archivedAt),
     reviewed: isReviewed,
+    noReplyNeeded,
+    noReplySuggested: isInformational(email) && !draftStarted && !isDone,
+    canMarkNoReply: canMarkNoReply(email),
+    canReopenNoReply: noReplyNeeded && !email.archivedAt,
     status: isDone ? "Done" : "Open",
     workflowStatus: workflowLabel(email.workflowState),
     requiresDraft,
@@ -631,6 +645,7 @@ function createTaskFromEmail(email) {
   const now = new Date().toISOString();
   return normalizeTask({
     id: `task-${email.id}`,
+    origin: "automatic_email",
     emailId: email.id,
     title: email.suggestedAction || `Review ${email.subject}`,
     description: email.summary || email.explanation || email.subject,
@@ -649,9 +664,20 @@ function createTaskFromEmail(email) {
 }
 
 function syncTasksFromEmails() {
+  // Remove only untouched auto-created informational tasks; preserve all user work.
+  state.tasks = state.tasks.filter(task => {
+    const email = state.emails.find(item => item.id === task.emailId);
+    if (!email || !isInformational(email) || findDraftByEmailId(email.id)) return true;
+    const untouched = task.id === `task-${email.id}` && task.origin !== "manual"
+      && task.history.length === 1 && task.history[0].label === "Task created from local inbox item"
+      && task.status === "Open" && !task.notes && !task.dueAt && !task.followUp?.enabled
+      && !task.collaboratorIds.length && task.assignedTo === (email.assignedTo || "")
+      && task.createdAt === task.updatedAt;
+    return !untouched;
+  });
   const existingIds = new Set(state.tasks.map((task) => task.emailId));
   visibleEmails()
-    .filter((email) => !emailIsComplete(email))
+    .filter((email) => !emailIsComplete(email) && !isInformational(email))
     .forEach((email) => {
       if (!existingIds.has(email.id)) {
         state.tasks.push(createTaskFromEmail(email));
@@ -981,22 +1007,16 @@ function isAdjacentSwap(left, right) {
 }
 
 function assistantMessageMatches(message, aliases) {
-  const tokens = message.split(" ").filter(Boolean);
-
-  return aliases.some((alias) => {
-    if (alias.includes(" ")) return message.includes(alias);
-
-    return tokens.some((token) => {
-      if (token === alias) return true;
-      if (isAdjacentSwap(token, alias)) return true;
-      const tolerance = alias.length >= 7 ? 2 : alias.length >= 4 ? 1 : 0;
-      return tolerance > 0 && Math.abs(token.length - alias.length) <= tolerance && editDistance(token, alias) <= tolerance;
-    });
-  });
+  // Match bounded commands, never a keyword buried in an unrelated question.
+  return aliases.some(alias => message === alias || (message.split(" ").length === alias.split(" ").length
+    && (isAdjacentSwap(message, alias) || (alias.length >= 4 && editDistance(message, alias) <= 1))));
 }
 
 function answerAssistantCommand(rawMessage, context = {}) {
-  const message = normalizeAssistantMessage(rawMessage);
+  const message = normalizeAssistantMessage(rawMessage)
+    .replace(/^(please |s il te plait |svp )/, "")
+    .replace(/^(show |open |go to |affiche |afficher |montre |montrer |ouvre |ouvrir )/, "")
+    .replace(/^(the |les |la |le |l )/, "");
   const inboxEmails = visibleEmails();
   const urgentCount = inboxEmails.filter((email) => !emailIsComplete(email) && email.urgency === "High").length;
   const invoiceCategory = categoryName("cat-accounting", "Accounting");
@@ -1005,24 +1025,24 @@ function answerAssistantCommand(rawMessage, context = {}) {
     .map(buildDraftView)
     .filter((draft) => draft.awaitingApproval)
     .length;
-  const mentionsInvoice = assistantMessageMatches(message, ["invoice", "invoices", "accounting"]);
-  const mentionsRule = assistantMessageMatches(message, ["rule", "rules", "create rule"]);
+  const mentionsInvoice = assistantMessageMatches(message, ["invoice", "invoices", "invoice emails", "accounting", "factures", "courriels de facture"]);
+  const mentionsRule = assistantMessageMatches(message, ["invoice rule", "create invoice rule", "regle de facture", "creer une regle de facture"]);
 
-  if (assistantMessageMatches(message, ["urgent", "urgency"])) {
+  if (assistantMessageMatches(message, ["urgent", "urgency", "urgent emails", "urgent messages", "courriels urgents", "urgents"])) {
     return {
       text: `${urgentCount} urgent emails are open. I switched Triage to urgent items.`,
       action: { type: "show_triage", filter: "urgent" }
     };
   }
 
-  if (assistantMessageMatches(message, ["triage", "inbox", "show inbox", "open inbox"])) {
+  if (assistantMessageMatches(message, ["triage", "inbox", "boite de reception"])) {
     return {
       text: "I opened the full Triage inbox.",
       action: { type: "show_triage", filter: "all" }
     };
   }
 
-  if (mentionsInvoice && mentionsRule) {
+  if (mentionsRule) {
     const rule = getOrCreateInvoiceRule();
     return {
       text: `Invoice rule is ready in observation mode. It is still fake/local and will not touch a mailbox.`,
@@ -1037,21 +1057,21 @@ function answerAssistantCommand(rawMessage, context = {}) {
     };
   }
 
-  if (assistantMessageMatches(message, ["draft", "drafts", "approval", "approve"])) {
+  if (assistantMessageMatches(message, ["draft", "drafts", "approval", "draft approval", "draft needing approval", "drafts needing approval", "brouillons", "brouillons a approuver"])) {
     return {
       text: `${waitingDrafts} saved drafts need human approval. I opened the Drafts queue.`,
       action: { type: "show_drafts", filter: "needs_approval" }
     };
   }
 
-  if (assistantMessageMatches(message, ["digest", "morning digest"])) {
+  if (assistantMessageMatches(message, ["digest", "morning digest", "generate digest", "regenerate digest", "resume", "generer le resume"])) {
     return {
       text: "I regenerated the morning digest from local demo data.",
       action: { type: "generate_digest" }
     };
   }
 
-  if (assistantMessageMatches(message, ["explain", "explanation", "why"])) {
+  if (assistantMessageMatches(message, ["explain", "explanation", "why", "explain this email", "pourquoi", "explique ce courriel"])) {
     if (!context.selectedEmailId) {
       return {
         text: "Open an email in Triage first, then ask me to explain it. I will show the flagged reason."
@@ -1064,7 +1084,7 @@ function answerAssistantCommand(rawMessage, context = {}) {
     };
   }
 
-  if (assistantMessageMatches(message, ["reset", "restart"])) {
+  if (assistantMessageMatches(message, ["reset", "restart", "reset demo", "reset demo data", "reinitialiser la demo"])) {
     return {
       text: "I can reset the fake demo data now. The page will reload so defaults come back clean.",
       action: { type: "reset_demo_data" }
@@ -1072,7 +1092,7 @@ function answerAssistantCommand(rawMessage, context = {}) {
   }
 
   return {
-    text: "I did not catch that. Try one of the command hints below."
+    text: trustCopy[context.language === "fr" ? "fr" : "en"].unsupported
   };
 }
 
@@ -1366,7 +1386,9 @@ export async function generateDraftReply(id) {
     emailId: id,
     title: email.suggestedAction,
     source: email.subject,
-    text: email.draft,
+    // Current demo templates apply to new drafts, including older saved mailboxes.
+    // Existing reviewed/edited drafts are returned above and are never overwritten.
+    text: mockEmails.find(template => template.id === email.id)?.draft || email.draft,
     confidence: email.confidence,
     risk: email.urgency === "High" ? "High" : "Low",
     createdAt: now,
@@ -1519,6 +1541,35 @@ export async function markEmailDone(id) {
   return clone(buildEmailView(email));
 }
 
+export async function markEmailNoReplyNeeded(id) {
+  await delay(300);
+  const email = findEmail(id);
+  if (!canMarkNoReply(email)) {
+    const error = new Error("Review an eligible informational email with no draft first.");
+    error.translationKey = "trust.noReplyBlocked";
+    throw error;
+  }
+  email.workflowState = WORKFLOW_STATE.NO_REPLY_NEEDED;
+  recordActivity("email-no-reply-needed", { emailId: id, label: `Reviewed; no reply needed: ${email.subject}` });
+  syncTasksFromEmails();
+  persistState();
+  return clone(buildEmailView(email));
+}
+
+export async function reopenNoReplyEmail(id) {
+  await delay(300);
+  const email = findEmail(id);
+  if (email.workflowState !== WORKFLOW_STATE.NO_REPLY_NEEDED || email.archivedAt) {
+    const error = new Error("This no-reply decision cannot be reopened.");
+    error.translationKey = "trust.noReplyBlocked";
+    throw error;
+  }
+  email.workflowState = WORKFLOW_STATE.NEEDS_REVIEW;
+  recordActivity("email-review-reopened", { emailId: id, label: `Reopened for review: ${email.subject}` });
+  persistState();
+  return clone(buildEmailView(email));
+}
+
 export async function updateEmailCategory(id, category) {
   await delay(400);
   if (!category) throw new Error("Choose a category before saving.");
@@ -1641,6 +1692,7 @@ export async function getOrCreateEmailTask(emailId) {
   if (task && isEmployeeSession() && !taskParticipants(task).includes(sessionEmployeeId())) throw taskError("forbidden");
   if (!task) {
     task = createTaskFromEmail(email);
+    task.origin = "manual";
     state.tasks.push(task);
     persistState();
   }

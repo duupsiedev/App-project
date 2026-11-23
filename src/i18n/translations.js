@@ -2,9 +2,11 @@ import { redesignCopy } from "./redesignCopy.js";
 import { taskCopy } from "./taskCopy.js";
 import { preferencesCopy } from "./preferencesCopy.js";
 import { employeeCopy } from "./employeeCopy.js";
+import { trustCopy } from "./trustCopy.js";
 
 const translations = {
   en: {
+    trust: trustCopy.en,
     employee: employeeCopy.en,
     preferences: preferencesCopy.en,
     taskWork: taskCopy.en,
@@ -81,9 +83,9 @@ const translations = {
       emptyInvoices: "No invoice emails are waiting for review.",
       emptyCategory: "No emails match this category filter.",
       emptyAll: "No emails are available in this local demo.",
-      remove: "Remove",
+      remove: "Archive from demo inbox",
       removing: "Removing...",
-      removeFiltered: "Remove filtered",
+      removeFiltered: "Archive filtered emails",
       removeFilteredDisabled: "No removable emails in the current view.",
       removeConfirmTitle: "Remove this email from the demo inbox?",
       removeConfirmMessage: "This only hides the fake/local demo email. Nothing is deleted from a real mailbox:",
@@ -170,6 +172,7 @@ const translations = {
     }
   },
   fr: {
+    trust: trustCopy.fr,
     employee: employeeCopy.fr,
     preferences: preferencesCopy.fr,
     taskWork: taskCopy.fr,
@@ -246,9 +249,9 @@ const translations = {
       emptyInvoices: "Aucun courriel de facture n'attend une révision.",
       emptyCategory: "Aucun courriel ne correspond à cette catégorie.",
       emptyAll: "Aucun courriel n'est disponible dans cette démo locale.",
-      remove: "Retirer",
+      remove: "Archiver de la boîte de démo",
       removing: "Retrait...",
-      removeFiltered: "Retirer la sélection",
+      removeFiltered: "Archiver les courriels filtrés",
       removeFilteredDisabled: "Aucun courriel retirable dans la vue actuelle.",
       removeConfirmTitle: "Retirer ce courriel de la boîte de démo?",
       removeConfirmMessage: "Cela cache seulement le faux courriel local. Rien n'est supprimé d'une vraie boîte:",

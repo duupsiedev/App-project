@@ -17,7 +17,7 @@ export const mockEmails = [
       "The last message uses negative sentiment and asks for owner attention."
     ],
     summary: "Client is frustrated by delayed response. Recommend owner review today.",
-    draft: "Hi, thank you for the follow-up. I'm sorry this has taken longer than expected. I am escalating this now and will make sure you receive a clear update today."
+    draft: "Hi, thank you for following up. I'm sorry you are still waiting for a response about this service issue. The next steps and timing need to be confirmed with the person responsible."
   },
   {
     id: "email-2",
@@ -37,7 +37,7 @@ export const mockEmails = [
       "Invoice appears related to recurring monthly services."
     ],
     summary: "Supplier is requesting a payment-status update for invoice #1844.",
-    draft: "Hi, thanks for checking in. We are reviewing invoice #1844 with accounting and will send a status update shortly."
+    draft: "Hi, thanks for checking in about invoice #1844. The payment status and timing still need to be confirmed with accounting."
   },
   {
     id: "email-3",
@@ -77,7 +77,7 @@ export const mockEmails = [
       "Message should be categorized for payroll review."
     ],
     summary: "Payroll documents are attached and ready to route to payroll workflow.",
-    draft: "Hi, thanks. We received the payroll documents and will review them for the current period."
+    draft: "Hi, thank you for your message about the payroll documents. Receipt of the attachments and the review timing still need to be confirmed."
   },
   {
     id: "email-5",
@@ -117,18 +117,19 @@ export const mockEmails = [
       "No urgent sentiment or billing issue detected."
     ],
     summary: "Client wants to reschedule tomorrow's appointment to next Tuesday afternoon.",
-    draft: "Hi, thanks for letting us know. Next Tuesday afternoon should work on our side. Could you confirm your preferred time window?"
+    draft: "Hi, thanks for letting us know. Availability for next Tuesday afternoon has not yet been confirmed. Could you share your preferred time window?"
   },
   {
     id: "email-7",
     subject: "Weekly partner newsletter",
+    suggestedDisposition: "information_only",
     sender: "Service Ledger Weekly",
     senderEmail: "updates@serviceledger.example",
     body: "This week's roundup includes product tips, partner webinars, and a checklist for organizing client documents before month end.",
     category: "Newsletter",
     urgency: "Low",
     confidence: 79,
-    suggestedAction: "Remove from demo inbox",
+    suggestedAction: "Review as information only",
     requiresDraft: true,
     assignedTo: "",
     explanation: "Courio categorized this as a newsletter because it is a broadcast update with no client request, deadline, or required reply.",
@@ -137,6 +138,6 @@ export const mockEmails = [
       "Low-priority inbox noise that can be removed from the demo inbox after review."
     ],
     summary: "Newsletter-style update. No reply appears needed.",
-    draft: "No reply needed. This local demo item can be removed from the inbox after review."
+    draft: "Hi, thank you for sharing this update."
   }
 ];

@@ -102,6 +102,12 @@ try {
   await page.locator('[data-destination="drafts"]').waitFor();
   await page.locator('[data-destination="drafts"]').click();
   assert.match(await page.locator("#drafts").innerText(), /Ready|ready|complete/);
+  await page.locator('[data-destination="dashboard"]').click();
+  const readyQueue = page.locator('#dashboard section').filter({ hasText: "Approved drafts awaiting human send" });
+  assert.match(await readyQueue.innerText(), /\(1\)/);
+  await page.screenshot({ path: ".courio-review/approved-today-desktop.png", fullPage: true });
+  await readyQueue.getByRole("button", { name: "View approved drafts" }).click();
+  assert(await page.locator('[data-draft-filter="ready"]').evaluate(button => button.classList.contains("active")));
   await page.locator('[data-destination="admin"]').last().click();
   await page.locator('[data-setting="language"]').selectOption("fr");
   await page.locator('[data-save-settings]').click();

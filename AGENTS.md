@@ -25,8 +25,9 @@ Ask for clarification when an assumption could materially affect workflows, cost
 - Always explain why Courio suggested an action, category, rule, or escalation.
 - Keep language simple, calm, and trustworthy for non-technical small business owners.
 - Preserve workflow integrity: one email, one workflow, one draft state.
-- Every email must follow the same workflow: review, generate draft, edit/save, approve as ready for human send, then complete automatically.
-- Future fake incoming emails must use this workflow by default and must not expose a direct completion shortcut.
+- Emails requiring a reply follow: review, generate draft, edit/save, approve as ready for human send, then finish preparation automatically. Approval does not mean sent or resolved.
+- Explicitly informational, low-urgency emails may be marked "No reply needed" only after review and human confirmation, when no draft exists. This decision must be reversible and enforced by the API.
+- Future fake incoming emails use the reply workflow by default. Do not infer a no-reply shortcut from a category name alone.
 
 ## User Trust Rule
 

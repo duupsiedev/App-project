@@ -159,6 +159,13 @@ function renderOverview({ state, t, navigateTo }) {
   const lower = node("div", "overview-lower");
   lower.append(next, side);
   root.replaceChildren(metrics, start, lower);
+  const readyCount = state.drafts.filter(draft => draft.isReadyForHumanSend).length;
+  if (readyCount) {
+    const pendingSend = node("section", "employee-today-tasks");
+    pendingSend.append(node("h2", "", `${t("trust.readyQueue")} (${readyCount})`), node("p", "", t("trust.readyNote")),
+      button(t("trust.viewReady"), PencilLine, () => navigateTo("drafts", { draftFilter: "ready" })));
+    metrics.after(pendingSend);
+  }
   if (state.session?.role === "Employee") appendEmployeeTasks(root, state.tasks, t);
 }
 
@@ -418,13 +425,13 @@ export function applyWorkspaceLayout(context) {
   renderQueue(context, "triage", {
     records: state.emails, trigger: "[data-review-email]", attribute: "data-review-email",
     title: item => item.subject, subtitle: item => item.sender, avatar: item => item.sender,
-    status: item => `${item.category} · ${item.workflowLabel || item.status}`,
+    status: item => `${item.category} · ${item.noReplyNeeded ? context.t("trust.noReply") : item.noReplySuggested ? context.t("trust.reviewFirst") : item.draftReadyForHumanSend ? context.t("trust.ready") : item.workflowLabel || item.status}`,
     omit: [0, 1], labels: ["subject", "sender", "category", "assigned", "workflow", "status"]
   });
   renderQueue(context, "drafts", {
     records: state.drafts, trigger: "[data-review-draft]", attribute: "data-review-draft", checkColumn: 0,
     title: item => item.title, subtitle: item => item.source, avatar: item => item.source,
-    status: item => item.statusLabel, omit: [0, 1], labels: ["review", "subject", "source", "risk", "status"]
+    status: item => item.isReadyForHumanSend ? context.t("trust.ready") : item.statusLabel, omit: [0, 1], labels: ["review", "subject", "source", "risk", "status"]
   });
   renderQueue(context, "tasks", {
     records: state.tasks, trigger: "[data-review-task]", attribute: "data-review-task", checkColumn: 0,

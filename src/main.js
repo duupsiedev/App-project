@@ -12,6 +12,8 @@ import { renderAssistantView } from "./ui/assistantView.js";
 import { escapeHtml, escapeList } from "./ui/helpers.js";
 import {
   approveDraft,
+  markEmailNoReplyNeeded,
+  reopenNoReplyEmail,
   approveDrafts,
   approveLowRiskDrafts,
   archiveEmails,
@@ -724,14 +726,14 @@ function renderTriage() {
                 <small class="triage-reason" title="${escapeHtml(email.explanation || "")}">Why: ${escapeHtml(email.explanation || "Matched the current local category rules.")}</small>
               </td>
               <td>${escapeHtml(employeeById[email.assignedTo]?.name || "Unassigned")}</td>
-              <td>${escapeHtml(email.workflowLabel || "Not started")}</td>
-              <td><span class="badge ${email.status === "Done" ? "done" : ""}">${escapeHtml(email.status)}</span></td>
+              <td>${escapeHtml(email.noReplyNeeded ? t("trust.noReply") : email.noReplySuggested ? t("trust.reviewFirst") : email.draftReadyForHumanSend ? t("trust.ready") : email.workflowLabel || "Not started")}</td>
+              <td><span class="badge ${email.status === "Done" ? "done" : ""}">${escapeHtml(email.noReplyNeeded ? t("trust.noReply") : email.draftReadyForHumanSend ? t("trust.ready") : email.status)}</span></td>
               <td class="actions">
                 <button class="btn subtle" data-review-email="${email.id}" ${isBusy(`review-${email.id}`) ? "disabled" : ""}>${isBusy(`review-${email.id}`) ? "Opening..." : "Review"}</button>
                 <button class="btn subtle" data-archive-email="${email.id}" ${!email.canArchive || isBusy(`archive-${email.id}`) ? `disabled title="${escapeHtml(email.archiveBlocker || "Remove this fake/local email from the demo inbox.")}"` : ""}>${isBusy(`archive-${email.id}`) ? t("triage.removing") : t("triage.remove")}</button>
                 ${email.status === "Done"
-                  ? `<span class="status-text">Complete</span>`
-                  : `<span class="status-text" title="Generate, review, save, and approve a draft to complete this workflow.">Draft required</span>`}
+                  ? `<span class="status-text">${t(email.noReplyNeeded ? "trust.noReply" : "trust.ready")}</span>`
+                  : email.noReplySuggested ? `<span class="status-text">${t("trust.reviewFirst")}</span>` : `<span class="status-text" title="Generate, review, save, and approve a draft to complete this workflow.">Draft required</span>`}
               </td>
             </tr>
           `).join("")}
@@ -1017,14 +1019,14 @@ function renderDrawer() {
       <div class="drawer-grid">
         <div class="mini-stat"><span>Urgency</span><strong>${escapeHtml(email.urgency)}</strong></div>
         <div class="mini-stat"><span>Confidence</span><strong>${email.confidence}%</strong></div>
-        <div class="mini-stat"><span>Status</span><strong>${escapeHtml(email.status)}</strong></div>
+        <div class="mini-stat"><span>Status</span><strong>${escapeHtml(email.noReplyNeeded ? t("trust.noReply") : email.draftReadyForHumanSend ? t("trust.ready") : email.status)}</strong></div>
         <div class="mini-stat"><span>Owner</span><strong>${escapeHtml(assignedEmployee?.name || "Unassigned")}</strong></div>
       </div>
 
       <div class="drawer-section">
         <h3>Draft workflow</h3>
         <div class="preview">
-          ${emailDone ? "This email is completed. Draft actions are locked unless the email is reopened later." : email.draftId ? `${email.draftReadyForHumanSend ? "Draft approved and ready for human send." : `Draft exists: ${escapeHtml(email.draftStatusLabel)}.`} One email uses one draft record.` : "No active draft exists for this email."}
+          ${email.noReplyNeeded ? t("trust.noReplyDone") : email.noReplySuggested ? t("trust.noReplyHint") : emailDone ? t("trust.notSent") : email.draftId ? `${email.draftReadyForHumanSend ? t("trust.ready") : `Draft exists: ${escapeHtml(email.draftStatusLabel)}.`} One email uses one draft record.` : "No active draft exists for this email."}
         </div>
       </div>
 
@@ -1051,11 +1053,13 @@ function renderDrawer() {
       <div class="drawer-actions">
         <button class="btn primary" data-summary-email="${email.id}" ${isBusy(`summary-${email.id}`) ? "disabled" : ""}>${isBusy(`summary-${email.id}`) ? "Summarizing..." : "Summarize"}</button>
         <button class="btn subtle" data-email-task="${email.id}">${t("taskWork.emailTask")}</button>
-        ${email.canOpenDraft ? `<button class="btn subtle" data-open-email-draft="${email.id}" ${isBusy(`open-email-draft-${email.id}`) ? "disabled" : ""}>${email.draftActionLabel}</button>` : `<button class="btn subtle" data-generate-draft="${email.id}" ${!email.canGenerateDraft || isBusy(`draft-${email.id}`) ? `disabled title="${email.completionBlocker || "Draft action is unavailable."}"` : ""}>${isBusy(`draft-${email.id}`) ? "Drafting..." : email.draftActionLabel}</button>`}
+        ${email.canMarkNoReply ? `<button class="btn primary" data-no-reply-email="${email.id}">${t("trust.markNoReply")}</button>` : ""}
+        ${email.canReopenNoReply ? `<button class="btn subtle" data-reopen-no-reply="${email.id}">${t("trust.reopen")}</button>` : ""}
+        ${email.noReplyNeeded ? "" : email.canOpenDraft ? `<button class="btn subtle" data-open-email-draft="${email.id}" ${isBusy(`open-email-draft-${email.id}`) ? "disabled" : ""}>${email.draftActionLabel}</button>` : `<button class="btn subtle" data-generate-draft="${email.id}" ${!email.canGenerateDraft || isBusy(`draft-${email.id}`) ? `disabled title="${email.completionBlocker || "Draft action is unavailable."}"` : ""}>${isBusy(`draft-${email.id}`) ? "Drafting..." : email.draftActionLabel}</button>`}
         <button class="btn subtle" data-archive-email="${email.id}" ${!email.canArchive || isBusy(`archive-${email.id}`) ? `disabled title="${escapeHtml(email.archiveBlocker || "Remove this fake/local email from the demo inbox.")}"` : ""}>${isBusy(`archive-${email.id}`) ? t("triage.removing") : t("triage.remove")}</button>
         ${emailDone
-          ? `<span class="status-text">Workflow complete</span>`
-          : `<span class="status-text">Approving the draft completes this workflow.</span>`}
+          ? `<span class="status-text">${t(email.noReplyNeeded ? "trust.noReplyDone" : "trust.notSent")}</span>`
+          : `<span class="status-text">${t(email.noReplySuggested ? "trust.noReplyHint" : "trust.approvalHint")}</span>`}
       </div>
       <section class="workspace-rule-suggestions"><h3>${t("employee.automation")}</h3><p>${t("employee.automationNote")}</p>
         ${(email.automationSuggestions || []).map(rule => `<div><strong>${escapeHtml(rule.title)}</strong><p>${escapeHtml(rule.explanation)}</p>${rule.category !== email.category && !emailDone ? `<button class="btn subtle" data-apply-workspace-rule="${escapeHtml(rule.id)}" data-rule-email="${escapeHtml(email.id)}">${t("employee.applyCategory")}: ${escapeHtml(rule.category)}</button>` : ""}</div>`).join("") || `<p>${t("employee.noRules")}</p>`}
@@ -1154,7 +1158,7 @@ function renderDraftDrawer(root) {
     <aside class="review-drawer" aria-label="Draft review">
       <div class="drawer-header">
         <div>
-          <div class="badge ${draft.isReadyForHumanSend ? "done" : "pending"}">${escapeHtml(draft.statusLabel)}</div>
+          <div class="badge ${draft.isReadyForHumanSend ? "done" : "pending"}">${escapeHtml(draft.isReadyForHumanSend ? t("trust.ready") : draft.statusLabel)}</div>
           <h2>${escapeHtml(draft.title)}</h2>
           <p>Source: ${escapeHtml(sourceEmail.subject || draft.source)}</p>
         </div>
@@ -1171,7 +1175,7 @@ function renderDraftDrawer(root) {
       </div>
 
       <div class="drawer-grid">
-        <div class="mini-stat"><span>Status</span><strong>${escapeHtml(sourceDone ? "Completed" : draft.statusLabel)}</strong></div>
+        <div class="mini-stat"><span>Status</span><strong>${escapeHtml(sourceDone ? t("trust.ready") : draft.statusLabel)}</strong></div>
         <div class="mini-stat"><span>Risk level</span><strong>${escapeHtml(draft.risk || "Low")}</strong></div>
         <div class="mini-stat"><span>Confidence</span><strong>${draft.confidence || sourceEmail.confidence || 80}%</strong></div>
         <div class="mini-stat"><span>Sending</span><strong>Never automatic</strong></div>
@@ -1190,14 +1194,14 @@ function renderDraftDrawer(root) {
 
       <div class="drawer-actions">
         ${sourceDone
-          ? `<span class="status-text">Workflow complete. This draft is ready for human send.</span>`
+          ? `<span class="status-text">${t("trust.notSent")}</span>`
           : `
             <button class="btn primary" data-save-draft="${draft.id}" ${isBusy(`save-${draft.id}`) ? "disabled" : ""}>${isBusy(`save-${draft.id}`) ? "Saving..." : "Save changes"}</button>
-            <button class="btn success" data-approve-draft="${draft.id}" ${!draft.canApprove || isBusy(`approve-${draft.id}`) ? `disabled title="${draft.approvalBlocker || "Save the reviewed draft before approving."}"` : ""}>${isBusy(`approve-${draft.id}`) ? "Approving..." : "Approve and complete"}</button>
+            <button class="btn success" data-approve-draft="${draft.id}" ${!draft.canApprove || isBusy(`approve-${draft.id}`) ? `disabled title="${draft.approvalBlocker || "Save the reviewed draft before approving."}"` : ""}>${isBusy(`approve-${draft.id}`) ? "Approving..." : t("trust.approve")}</button>
           `}
         <button class="btn subtle" data-close-drawer>Close</button>
       </div>
-      <p class="drawer-note">Approval completes this workflow and marks the draft ready for a person to send. Courio never sends email.</p>
+      <p class="drawer-note">${t("trust.draftCheck")} ${t("trust.notSent")}</p>
     </aside>
   `;
 }
@@ -1461,12 +1465,12 @@ function renderDrafts() {
               <td>${escapeHtml(draft.title)}</td>
               <td>${escapeHtml(draft.source)}</td>
               <td><span class="badge ${draft.risk === "High" ? "urgent" : "done"}">${escapeHtml(draft.risk || "Low")}</span></td>
-              <td><span class="badge ${draft.isReadyForHumanSend ? "done" : "pending"}">${escapeHtml(draft.statusLabel)}</span></td>
+              <td><span class="badge ${draft.isReadyForHumanSend ? "done" : "pending"}">${escapeHtml(draft.isReadyForHumanSend ? t("trust.ready") : draft.statusLabel)}</span></td>
               <td class="actions">
                 <button class="btn subtle" data-review-draft="${draft.id}" ${isBusy(`review-draft-${draft.id}`) ? "disabled" : ""}>${isBusy(`review-draft-${draft.id}`) ? "Opening..." : "Review"}</button>
                 ${draft.isReadyForHumanSend
-                  ? `<span class="status-text">Workflow complete</span>`
-                  : `<button class="btn success" data-approve-draft="${draft.id}" ${!draft.canApprove || isBusy(`approve-${draft.id}`) ? `disabled title="${draft.approvalBlocker || "Review and save this draft first."}"` : ""}>${isBusy(`approve-${draft.id}`) ? "Approving..." : "Approve and complete"}</button>`}
+                  ? `<span class="status-text">${t("trust.ready")}</span>`
+                  : `<button class="btn success" data-approve-draft="${draft.id}" ${!draft.canApprove || isBusy(`approve-${draft.id}`) ? `disabled title="${draft.approvalBlocker || "Review and save this draft first."}"` : ""}>${isBusy(`approve-${draft.id}`) ? "Approving..." : t("trust.approve")}</button>`}
               </td>
             </tr>
           `).join("")}
@@ -1486,7 +1490,7 @@ function renderDrafts() {
       <div class="actions below-sm">
         <button class="btn success" data-approve-selected ${selectedCount === 0 || isBusy("approve-selected") ? `disabled title="${selectedCount === 0 ? "Select at least one reviewed and saved draft." : ""}"` : ""}>${isBusy("approve-selected") ? "Approving..." : `Approve selected (${selectedCount})`}</button>
         <button class="btn subtle" data-approve-low-risk ${lowRiskDisabled || lowRiskPendingCount === 0 || isBusy("approve-low-risk") ? `disabled title="${lowRiskDisabled ? "Enable low-risk bulk approval in Advanced workspace settings." : lowRiskPendingCount === 0 ? "No reviewed low-risk drafts are ready for approval." : ""}"` : ""}>${lowRiskDisabled ? "Low-risk bulk approval disabled" : isBusy("approve-low-risk") ? "Approving..." : `Approve all low-risk (${lowRiskPendingCount})`}</button>
-        <span class="mode">Approval completes the workflow; nothing is sent</span>
+        <span class="mode">${t("trust.approvalHint")}</span>
       </div>
       ${lowRiskDisabled ? `<div class="preview below-sm">Low-risk bulk approval is disabled by workspace settings.</div>` : ""}
       ${content}
@@ -1514,6 +1518,7 @@ function renderAssistant() {
 async function submitAssistantCommand(message) {
   await runAction("assistant", async () => {
     const result = await sendAssistantCommand(message, {
+      language: currentLanguage(),
       selectedEmailId: state.selectedEmail?.id || null
     });
     state.assistantMessages = result.messages;
@@ -1766,6 +1771,22 @@ document.addEventListener("click", async (event) => {
     });
     return;
   }
+  if (target.dataset.noReplyEmail) {
+    state.confirmDialog = { type: "no-reply", emailId: target.dataset.noReplyEmail,
+      title: t("trust.noReplyConfirm"), message: t("trust.noReplyConfirmNote"), primaryLabel: t("trust.markNoReply") };
+    render();
+    return;
+  }
+  if (target.dataset.reopenNoReply) {
+    await runAction("reopen-no-reply", async () => {
+      await reopenNoReplyEmail(target.dataset.reopenNoReply);
+      await refreshEmails();
+      state.selectedEmail = null;
+      state.digest = await generateMorningDigest();
+      state.activity = await listActivity();
+    }, t("trust.reopened"));
+    return;
+  }
   if (target.dataset.restoreTask) {
     const task = state.tasks.find(item => item.id === target.dataset.restoreTask);
     const entry = task?.history.find(item => item.id === target.dataset.historyId);
@@ -1797,6 +1818,16 @@ document.addEventListener("click", async (event) => {
   if (target.dataset.confirmPrimary !== undefined) {
     const dialog = state.confirmDialog;
     state.confirmDialog = null;
+    if (dialog?.type === "no-reply") {
+      await runAction("no-reply", async () => {
+        await markEmailNoReplyNeeded(dialog.emailId);
+        await refreshEmails(dialog.emailId);
+        state.tasks = await listTasks();
+        state.digest = await generateMorningDigest();
+        state.activity = await listActivity();
+      }, t("trust.noReplyDone"));
+      return;
+    }
 
     if (dialog?.type === "restore-task") {
       await runAction("restore-task", async () => {
@@ -2226,7 +2257,7 @@ document.addEventListener("click", async (event) => {
     const id = target.dataset.approveDraft;
     await runAction(`approve-${id}`, async () => {
       await approveDraftWorkflow(id);
-    }, "Draft approved and workflow completed. Nothing was sent.");
+    }, t("trust.approvalHint"));
   }
 
   if (target.dataset.approveSelected !== undefined) {
@@ -2237,7 +2268,7 @@ document.addEventListener("click", async (event) => {
       state.activity = await listActivity();
       state.digest = await generateMorningDigest();
       state.selectedDraftIds = [];
-    }, "Selected drafts approved and workflows completed. Nothing was sent.");
+    }, t("trust.approvalHint"));
   }
 
   if (target.dataset.approveLowRisk !== undefined) {
@@ -2253,7 +2284,7 @@ document.addEventListener("click", async (event) => {
       state.activity = await listActivity();
       state.digest = await generateMorningDigest();
       state.selectedDraftIds = [];
-    }, "Low-risk drafts approved and workflows completed. Nothing was sent.");
+    }, t("trust.approvalHint"));
   }
 
   if (target.dataset.saveSettings !== undefined) {
